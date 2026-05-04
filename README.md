@@ -79,8 +79,8 @@ mcp-trc-admin (grupo)  ──►  mcp-trc-admin   ──►     soma
 
 | | OAuth Scopes (`scp`) | App Roles (`roles`) |
 |-|----------------------|---------------------|
-| Quem controla o acesso | Usuário (escolhe os scopes no login) | Admin (atribui roles aos grupos) |
-| Revogação | Usuário pode revogar | Admin revoga via associação de grupo |
+| Quem controla o acesso | App define, usuário consente | Admin (atribui roles aos grupos) |
+| Revogação | Usuário revoga consentimento | Admin revoga via associação de grupo |
 | Adequado para | Permissões delegadas pelo usuário | RBAC corporativo |
 | Auditável centralmente | Parcialmente | Sim, via Azure AD |
 
@@ -188,7 +188,7 @@ Endpoints publicados automaticamente pelo FastMCP no modo oauth:
 | Redirect URI no App Registration | ❌ | ✅ |
 | Fluxo de login via browser | ❌ externo | ✅ nativo |
 | Azure Container Apps com MI | ✅ ideal | ⚠️ mais complexo |
-| Gestão manual de token | Necessária | Automática |
+| Aquisição de token | Cliente/orchestrador (automatizável via MSAL/MI/OBO) | Automática |
 
 Para alternar entre modos, edite `AUTH_MODE` no `.env` e reinicie o servidor. Nenhuma alteração de código é necessária.
 
@@ -305,7 +305,7 @@ $body = @"
 {
   "appRoles": [
     {
-      "allowedMemberTypes": ["User"],
+      "allowedMemberTypes": ["User", "Application"],
       "description": "Acesso de leitura às ferramentas MCP",
       "displayName": "MCP Read",
       "id": "$ROLE_READ_ID",
@@ -313,7 +313,7 @@ $body = @"
       "value": "mcp-trc-read"
     },
     {
-      "allowedMemberTypes": ["User"],
+      "allowedMemberTypes": ["User", "Application"],
       "description": "Acesso administrativo às ferramentas MCP",
       "displayName": "MCP Admin",
       "id": "$ROLE_ADMIN_ID",
