@@ -1,6 +1,6 @@
 # 🔐 FastMCP + Microsoft Entra ID
 
-Implementação de referência corporativa de um servidor [FastMCP](https://gofastmcp.com) protegido com **Microsoft Entra ID (Azure AD)**, validação de JWT, controle de acesso por App Roles, middlewares de correlação e auditoria, e logs estruturados.
+Implementação de referência de um servidor [FastMCP](https://gofastmcp.com) com **autenticação Microsoft Entra ID (Azure AD)** em dois modos (JWT direto e OAuth Proxy), validação de JWT contra JWKS, controle de acesso por App Roles, middlewares de correlação e auditoria, e logs estruturados.
 
 O objetivo deste repositório é servir como **base reutilizável** para novos servidores MCP em ambiente corporativo. O código é pequeno e auditável. As tools incluídas (`soma`, `subtracao`, `multiplicacao`, `divisao`) existem apenas para demonstrar o fluxo completo e não são o foco do projeto.
 
@@ -31,7 +31,7 @@ O objetivo deste repositório é servir como **base reutilizável** para novos s
 Servidor MCP em Python (FastMCP) que expõe ferramentas (tools) sobre HTTP, com autenticação delegada ao **Microsoft Entra ID** e autorização por **App Roles**. Suporta dois modos de autenticação no mesmo binário:
 
 - 🪪 **`AUTH_MODE=jwt`**: o cliente envia um Bearer token Entra ID e o servidor valida o JWT contra o JWKS público do tenant. Indicado para portais corporativos, automações, Azure Container Apps com Managed Identity e qualquer cliente que já possua um token.
-- 🌐 **`AUTH_MODE=oauth`**: o servidor atua como **OAuth Proxy** para clientes interativos (Claude Desktop, Cursor, VS Code MCP). O fluxo de login no navegador é orquestrado pelo próprio FastMCP via `AzureProvider`.
+- 🌐 **`AUTH_MODE=oauth`**: o servidor atua como **OAuth Proxy** para clientes interativos. O fluxo de login no navegador é orquestrado pelo próprio FastMCP via `AzureProvider`.
 
 ### Problema que resolve
 
@@ -42,14 +42,6 @@ Servidores MCP costumam ser publicados sem qualquer barreira corporativa: tokens
 - 🙈 Filtragem do `tools/list` por token: o LLM nunca enxerga uma tool que o usuário não pode executar.
 - 📝 Auditoria estruturada de cada chamada, com identidade do chamador e `request_id`.
 - 🛡️ Redaction automático de campos sensíveis nos logs.
-
-### Por que serve como referência
-
-- 🧱 **Pequeno e auditável**: o núcleo cabe em algumas centenas de linhas.
-- 🧭 **Registro explícito de tools**: sem auto-discovery em produção.
-- 🧩 **Separação clara**: `auth`, `middleware`, `tools` e `config` em pacotes independentes.
-- ⚙️ **Provisionamento versionado**: scripts PowerShell idempotentes para criar a App Registration, scopes, App Roles e grupos de segurança no Entra ID.
-- 📚 **Decisões registradas**: ADRs em `docs/adr/` documentam o porquê de cada escolha.
 
 ---
 
@@ -76,7 +68,7 @@ O servidor é um ASGI app criado em `src/app/server.py`. Cada requisição HTTP 
 
 ```mermaid
 flowchart TD
-    Client[Cliente MCP<br/>Claude Desktop / Cursor / Portal / CLI]
+    Client[Cliente MCP]
     Correlation[CorrelationMiddleware<br/>request_id + client_ip]
     Auth[AuthProvider<br/>JWT verifier ou OAuth Proxy]
     Entra[(Microsoft Entra ID<br/>JWKS / OIDC metadata)]
@@ -174,14 +166,14 @@ sequenceDiagram
 | `scp` | Inclui `access_as_user` |
 | `roles` | Interseção não vazia com `{mcp-trc-read, mcp-trc-admin}` |
 
-### Modo `oauth` (recomendado para Claude Desktop / Cursor / VS Code)
+### Modo `oauth`
 
 O servidor expõe os endpoints OAuth (`/authorize`, `/token`, `/.well-known/...`) e age como proxy para o Entra ID. O cliente MCP descobre o servidor de autorização e dispara o fluxo no navegador.
 
 ```mermaid
 sequenceDiagram
     autonumber
-    participant Client as Cliente MCP (Claude/Cursor)
+    participant Client as Cliente MCP
     participant Browser as Navegador
     participant MCP as FastMCP (AzureProvider)
     participant Entra as Entra ID

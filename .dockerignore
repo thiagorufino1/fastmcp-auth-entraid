@@ -4,19 +4,25 @@
 .gitattributes
 
 # Python build artifacts
-__pycache__
+__pycache__/
 *.py[cod]
-*$py.class
-*.egg-info
+*.pyo
+*.egg-info/
 *.egg
-build
-dist
-.eggs
+build/
+dist/
+.eggs/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
 
 # Virtual environments
-.venv
-venv
-env
+.venv/
+venv/
+env/
 
 # Secrets and local config
 .env
@@ -26,41 +32,23 @@ env
 *.key
 *.p12
 *.pfx
+.python-version
 
-# IDE
-.vscode
-.idea
+# IDE and OS files
+.vscode/
+.idea/
 *.iml
 *.swp
 .DS_Store
 Thumbs.db
 
-# Tests and dev tooling
-tests
-.pytest_cache
-.mypy_cache
-.ruff_cache
-.coverage
-coverage.xml
-htmlcov
-
-# Provisioning scripts (run from host, not container)
-scripts
-
-# Docs and CI
-docs
-*.md
-!README.md
-.github
-
-# Lock for dev only
+# Local docs and operations only
+tests/
+docs/
+scripts/
+.github/
 requirements-dev.txt
-pyproject.toml
 
 # Logs
 *.log
-logs
-
-# Docker
-Dockerfile*
-.dockerignore
+logs/
