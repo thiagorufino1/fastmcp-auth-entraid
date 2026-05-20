@@ -34,8 +34,13 @@ tests = [
     "pytest>=8.3",
     "pytest-asyncio>=0.24",
 ]
+lint = [
+    "ruff>=0.8",
+    "mypy>=1.13",
+    "pre-commit>=4.0",
+]
 dev = [
-    "fastmcp-auth-entraid[tests]",
+    "fastmcp-auth-entraid[tests,lint]",
     "pip-tools>=7.4",
 ]
 
@@ -49,6 +54,74 @@ packages = ["src/app"]
 [tool.pip-tools]
 generate-hashes = false
 strip-extras = true
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests"]
+extend-exclude = [".venv", "build", "dist"]
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes
+    "I",    # isort
+    "B",    # bugbear
+    "C4",   # comprehensions
+    "UP",   # pyupgrade
+    "SIM",  # simplify
+    "S",    # bandit (security)
+    "RUF",  # ruff-specific
+    "PL",   # pylint
+    "TID",  # tidy imports
+    "PT",   # pytest style
+    "ASYNC",
+]
+ignore = [
+    "PLR0913",  # too many arguments (FastMCP factory pattern)
+    "S101",     # asserts are fine
+    "TID252",   # relative imports within package are idiomatic Python
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = [
+    "S101",     # asserts
+    "PLR2004",  # magic numbers in assertions
+    "S105",     # hardcoded password strings (test fixtures)
+    "S106",     # same
+    "PT019",    # underscore fixtures used for side effects are intentional
+    "PLC0415",  # imports inside tests are intentional (lazy load)
+]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "lf"
+
+[tool.mypy]
+python_version = "3.11"
+mypy_path = "src"
+files = ["src", "tests"]
+strict_optional = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+warn_unreachable = true
+no_implicit_reexport = false
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
+check_untyped_defs = true
+ignore_missing_imports = true
+exclude = [
+    "build/",
+    "dist/",
+    ".venv/",
+]
+
+[[tool.mypy.overrides]]
+module = "tests.*"
+disallow_untyped_defs = false
+check_untyped_defs = false
 
 [tool.pytest.ini_options]
 minversion = "8.0"

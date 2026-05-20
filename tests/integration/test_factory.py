@@ -41,7 +41,5 @@ class TestCreateMcp:
         from app.middleware import AuditMiddleware
 
         mcp = create_mcp()
-        middlewares = getattr(mcp, "_middleware", None) or getattr(
-            mcp, "middleware", []
-        )
+        middlewares = getattr(mcp, "_middleware", None) or getattr(mcp, "middleware", [])
         assert any(isinstance(m, AuditMiddleware) for m in middlewares)

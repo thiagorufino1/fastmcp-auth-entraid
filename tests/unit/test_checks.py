@@ -48,9 +48,7 @@ class TestRequireRoles:
 
     def test_extra_roles_in_token_do_not_break(self):
         check = require_roles("mcp-trc-read")
-        ctx = _FakeContext(
-            token=_FakeToken(claims={"roles": ["mcp-trc-read", "other-role"]})
-        )
+        ctx = _FakeContext(token=_FakeToken(claims={"roles": ["mcp-trc-read", "other-role"]}))
         assert check(ctx) is True
 
     def test_no_required_roles_always_false(self):

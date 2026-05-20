@@ -44,20 +44,14 @@ def make_verifier(monkeypatch):
 
 
 class TestVerifierLogging:
-    async def test_logs_invalid_when_parent_returns_none(
-        self, _reset_structlog, make_verifier
-    ):
+    async def test_logs_invalid_when_parent_returns_none(self, _reset_structlog, make_verifier):
         verifier = make_verifier(parent_return=None)
         with capture_logs() as events:
             await verifier.verify_token("x")
         assert any(e["event"] == "auth.token.invalid" for e in events)
 
-    async def test_logs_rejected_with_subject_when_no_role(
-        self, _reset_structlog, make_verifier
-    ):
-        token = _FakeAccessToken(
-            claims={"sub": "user-x", "roles": ["unauthorized"]}
-        )
+    async def test_logs_rejected_with_subject_when_no_role(self, _reset_structlog, make_verifier):
+        token = _FakeAccessToken(claims={"sub": "user-x", "roles": ["unauthorized"]})
         verifier = make_verifier(parent_return=token)
         with capture_logs() as events:
             await verifier.verify_token("x")
@@ -66,12 +60,8 @@ class TestVerifierLogging:
         assert rejected["reason"] == "no_allowed_role"
         assert rejected["token_roles"] == ["unauthorized"]
 
-    async def test_logs_accepted_with_granted_roles(
-        self, _reset_structlog, make_verifier
-    ):
-        token = _FakeAccessToken(
-            claims={"sub": "user-y", "roles": ["mcp-trc-admin", "other"]}
-        )
+    async def test_logs_accepted_with_granted_roles(self, _reset_structlog, make_verifier):
+        token = _FakeAccessToken(claims={"sub": "user-y", "roles": ["mcp-trc-admin", "other"]})
         verifier = make_verifier(parent_return=token)
         with capture_logs() as events:
             await verifier.verify_token("x")

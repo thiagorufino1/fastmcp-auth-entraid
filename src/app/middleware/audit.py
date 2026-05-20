@@ -40,9 +40,7 @@ class AuditMiddleware(Middleware):
     Never logs tool arguments or return values to avoid PII leakage.
     """
 
-    async def on_initialize(
-        self, context: MiddlewareContext, call_next: CallNext
-    ) -> Any:
+    async def on_initialize(self, context: MiddlewareContext, call_next: CallNext) -> Any:
         client_id = str(uuid.uuid4())
         structlog.contextvars.bind_contextvars(client_session=client_id)
         _logger.info(
@@ -55,9 +53,7 @@ class AuditMiddleware(Middleware):
         finally:
             pass
 
-    async def on_call_tool(
-        self, context: MiddlewareContext, call_next: CallNext
-    ) -> Any:
+    async def on_call_tool(self, context: MiddlewareContext, call_next: CallNext) -> Any:
         tool_name = getattr(getattr(context, "message", None), "name", "<unknown>")
         subject = _subject_from_token()
         roles = _roles_from_token()

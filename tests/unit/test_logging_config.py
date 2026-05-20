@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import logging
-from io import StringIO
 
 import pytest
 import structlog

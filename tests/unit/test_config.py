@@ -29,14 +29,14 @@ class TestAllowedRoles:
         assert isinstance(ALLOWED_ROLES, frozenset)
 
     def test_contains_expected_roles(self):
-        assert ALLOWED_ROLES == frozenset({"mcp-trc-read", "mcp-trc-admin"})
+        assert frozenset({"mcp-trc-read", "mcp-trc-admin"}) == ALLOWED_ROLES
 
 
 class TestSettingsDataclass:
     def test_is_frozen(self):
         settings = Settings(tenant_id="t", client_id="c")
         with pytest.raises(dataclasses.FrozenInstanceError):
-            settings.tenant_id = "other"  # type: ignore[misc]
+            settings.tenant_id = "other"
 
     def test_defaults_applied(self):
         settings = Settings(tenant_id="t", client_id="c")

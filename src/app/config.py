@@ -1,6 +1,6 @@
+import os
 from dataclasses import dataclass
 from functools import lru_cache
-import os
 
 DEFAULT_BASE_URL = "http://localhost:8000"
 DEFAULT_AUTH_MODE = "jwt"

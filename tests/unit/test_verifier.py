@@ -65,9 +65,7 @@ class TestRoleEnforcedJWTVerifier:
         assert await verifier.verify_token("any-token") is token
 
     async def test_returns_token_when_mixed_roles(self, make_verifier):
-        token = _FakeAccessToken(
-            claims={"roles": ["mcp-trc-read", "another-role"]}
-        )
+        token = _FakeAccessToken(claims={"roles": ["mcp-trc-read", "another-role"]})
         verifier = make_verifier(parent_return=token)
         assert await verifier.verify_token("any-token") is token
 

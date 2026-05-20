@@ -27,7 +27,7 @@ def configure_logging(*, force: bool = False) -> None:
     Emits JSON to stderr. Reads LOG_LEVEL env var (default INFO).
     Idempotent: second call is a no-op unless force=True.
     """
-    global _configured
+    global _configured  # noqa: PLW0603 — module-level idempotency guard
     if _configured and not force:
         return
 
