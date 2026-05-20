@@ -1,10 +1,12 @@
+import os
+
+import uvicorn
+
 from .logging_config import configure_logging
-from .server import create_mcp
+from .server import create_http_app
 
 if __name__ == "__main__":
     configure_logging()
-    create_mcp().run(
-        transport="streamable-http",
-        host="0.0.0.0",  # noqa: S104 — container binds all interfaces; ingress restricts exposure
-        port=8000,
-    )
+    host = os.getenv("MCP_HOST", "0.0.0.0")  # noqa: S104
+    port = int(os.getenv("MCP_PORT", "8000"))
+    uvicorn.run(create_http_app(), host=host, port=port)
