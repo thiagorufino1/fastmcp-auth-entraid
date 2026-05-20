@@ -34,3 +34,17 @@ repos:
     rev: v8.21.2
     hooks:
       - id: gitleaks
+
+  - repo: local
+    hooks:
+      - id: pip-audit
+        name: pip-audit (runtime lock)
+        entry: pip-audit
+        language: python
+        additional_dependencies: ["pip-audit>=2.7"]
+        args:
+          - "--requirement"
+          - "requirements.txt"
+          - "--strict"
+        pass_filenames: false
+        files: ^(requirements\.txt|pyproject\.toml)$
