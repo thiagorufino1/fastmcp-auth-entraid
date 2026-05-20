@@ -58,7 +58,7 @@ We commit to:
 
 Operational security guidance lives in:
 
-- [`README.md`](README.md) — section **Segurança**
-- [`docs/architecture.md`](docs/architecture.md) — trust boundaries
-- [`docs/adr/`](docs/adr/) — decision records (auth modes, App Roles, structlog, provisioning)
-- [`scripts/provisioning.md`](scripts/provisioning.md) — provisioning security notes
+- [`README.md`](README.md): section **Segurança**
+- [`docs/architecture.md`](docs/architecture.md): trust boundaries
+- [`docs/adr/`](docs/adr/): decision records (auth modes, App Roles, structlog, provisioning)
+- [`scripts/provisioning.md`](scripts/provisioning.md): provisioning security notes
