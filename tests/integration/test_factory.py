@@ -36,3 +36,12 @@ class TestCreateMcp:
         mcp = create_mcp()
         tools = await mcp._list_tools()
         assert {t.name for t in tools} == {"soma", "health_check"}
+
+    def test_audit_middleware_registered(self, azure_env):
+        from app.middleware import AuditMiddleware
+
+        mcp = create_mcp()
+        middlewares = getattr(mcp, "_middleware", None) or getattr(
+            mcp, "middleware", []
+        )
+        assert any(isinstance(m, AuditMiddleware) for m in middlewares)

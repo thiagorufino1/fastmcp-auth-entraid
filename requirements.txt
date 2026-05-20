@@ -170,6 +170,8 @@ starlette==1.0.0
     # via
     #   mcp
     #   sse-starlette
+structlog==25.5.0
+    # via fastmcp-auth-entraid (pyproject.toml)
 typing-extensions==4.15.0
     # via
     #   mcp

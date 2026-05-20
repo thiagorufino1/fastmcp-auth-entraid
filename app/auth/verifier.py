@@ -1,8 +1,11 @@
+import structlog
 from fastmcp.server.auth import RemoteAuthProvider
 from fastmcp.server.auth.providers.azure import AzureJWTVerifier, AzureProvider
 from pydantic import AnyHttpUrl
 
 from ..config import ALLOWED_ROLES, Settings
+
+_logger = structlog.get_logger("app.auth.verifier")
 
 
 class RoleEnforcedJWTVerifier(AzureJWTVerifier):
@@ -15,11 +18,28 @@ class RoleEnforcedJWTVerifier(AzureJWTVerifier):
     async def verify_token(self, token: str):
         access_token = await super().verify_token(token)
         if access_token is None:
+            _logger.warning("auth.token.invalid")
             return None
 
-        roles = set(access_token.claims.get("roles", []))
-        if not roles.intersection(self._allowed_roles):
+        claims = access_token.claims or {}
+        token_roles = set(claims.get("roles", []))
+        granted = token_roles.intersection(self._allowed_roles)
+        subject = claims.get("sub") or claims.get("oid")
+
+        if not granted:
+            _logger.warning(
+                "auth.token.rejected",
+                reason="no_allowed_role",
+                subject=subject,
+                token_roles=sorted(token_roles),
+            )
             return None
+
+        _logger.info(
+            "auth.token.accepted",
+            subject=subject,
+            granted_roles=sorted(granted),
+        )
         return access_token
 
 
