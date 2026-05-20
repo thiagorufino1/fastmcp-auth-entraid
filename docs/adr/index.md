@@ -15,6 +15,7 @@ the original to `Superseded by ADR-XXXX`.
 | [0002](0002-app-roles-over-oauth-scopes.md) | Use App Roles instead of OAuth scopes for authorization | Accepted |
 | [0003](0003-structlog-for-observability.md) | Use structlog with JSON output for observability | Accepted |
 | [0004](0004-powershell-for-entra-provisioning.md) | Use PowerShell scripts (not Terraform) for Entra provisioning | Accepted |
+| [0005](0005-reference-server-with-explicit-tool-registration.md) | Keep the server as a reference implementation with explicit tool registration | Accepted |
 
 ## Template
 

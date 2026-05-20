@@ -11,19 +11,26 @@ _REQUEST_ID_HEADER = "x-request-id"
 _FORWARDED_FOR_HEADER = "x-forwarded-for"
 
 
-def _parse_or_generate(value: str | None) -> str:
-    if value:
-        try:
-            return str(uuid.UUID(value))
-        except ValueError:
-            pass
+def _generate_request_id() -> str:
     return str(uuid.uuid4())
 
 
-def _extract_client_ip(headers: dict[bytes, bytes]) -> str | None:
-    forwarded = headers.get(_FORWARDED_FOR_HEADER.encode())
-    if forwarded:
-        return forwarded.decode(errors="replace").split(",")[0].strip()
+def _extract_client_ip(
+    headers: dict[bytes, bytes],
+    *,
+    trust_forwarded_for: bool,
+    scope: Scope,
+) -> str | None:
+    if trust_forwarded_for:
+        forwarded = headers.get(_FORWARDED_FOR_HEADER.encode())
+        if forwarded:
+            return forwarded.decode(errors="replace").split(",")[0].strip()
+
+    client = scope.get("client")
+    if isinstance(client, tuple) and client:
+        host = client[0]
+        if isinstance(host, str) and host.strip():
+            return host.strip()
     return None
 
 
@@ -31,17 +38,16 @@ class CorrelationMiddleware:
     """Starlette ASGI middleware that tags every HTTP request with a
     correlation ID and propagates it via structlog context variables.
 
-    - Reads ``X-Request-ID`` from the incoming request headers.
-    - If the value is a valid UUID it is reused; otherwise a new UUID v4
-      is generated (preventing header injection with arbitrary strings).
+    - Generates a fresh ``request_id`` server-side for every request.
     - Binds ``request_id`` and ``client_ip`` into structlog's contextvars
       so every log line emitted during the request carries them.
     - Appends ``X-Request-ID`` to the response headers.
     - Clears the contextvars after the response is fully sent.
     """
 
-    def __init__(self, app: ASGIApp) -> None:
+    def __init__(self, app: ASGIApp, *, trust_proxy_headers: bool = False) -> None:
         self.app = app
+        self._trust_proxy_headers = trust_proxy_headers
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http":
@@ -49,9 +55,12 @@ class CorrelationMiddleware:
             return
 
         headers = {k.lower(): v for k, v in scope.get("headers", [])}
-        raw_id = headers.get(_REQUEST_ID_HEADER.encode())
-        request_id = _parse_or_generate(raw_id.decode(errors="replace") if raw_id else None)
-        client_ip = _extract_client_ip(headers)
+        request_id = _generate_request_id()
+        client_ip = _extract_client_ip(
+            headers,
+            trust_forwarded_for=self._trust_proxy_headers,
+            scope=scope,
+        )
 
         structlog.contextvars.bind_contextvars(request_id=request_id, client_ip=client_ip)
 

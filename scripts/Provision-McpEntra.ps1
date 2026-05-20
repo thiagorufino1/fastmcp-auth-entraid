@@ -147,11 +147,17 @@ if ($OutEnvFile) {
     }
 }
 else {
+    $safeEnvContent = @"
+AZURE_TENANT_ID=$TenantId
+AZURE_CLIENT_ID=$clientId
+MCP_BASE_URL=http://localhost:8000
+AUTH_MODE=jwt
+"@
     Write-Host "=== .env values ===" -ForegroundColor Yellow
-    Write-Host $envContent
+    Write-Host $safeEnvContent
     if ($clientSecret) {
         Write-Host ""
-        Write-Warning "Client secret printed above. Capture securely and rotate when no longer needed."
+        Write-Warning "AZURE_CLIENT_SECRET was generated but not printed. Use -OutEnvFile to capture it securely."
     }
 }
 

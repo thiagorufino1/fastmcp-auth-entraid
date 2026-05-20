@@ -11,6 +11,18 @@ _DEFAULT_LEVEL: Final[str] = "INFO"
 _VALID_LEVELS: Final[frozenset[str]] = frozenset(
     {"CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG", "NOTSET"}
 )
+_SENSITIVE_KEYS: Final[frozenset[str]] = frozenset(
+    {
+        "authorization",
+        "access_token",
+        "client_secret",
+        "id_token",
+        "password",
+        "refresh_token",
+        "secret",
+        "token",
+    }
+)
 _configured: bool = False
 
 
@@ -19,6 +31,13 @@ def _resolve_level() -> int:
     if raw not in _VALID_LEVELS:
         raw = _DEFAULT_LEVEL
     return logging.getLevelNamesMapping()[raw]
+
+
+def _redact_sensitive_fields(_logger, _method_name, event_dict):
+    for key in list(event_dict):
+        if key.lower() in _SENSITIVE_KEYS:
+            event_dict[key] = "[REDACTED]"
+    return event_dict
 
 
 def configure_logging(*, force: bool = False) -> None:
@@ -40,6 +59,7 @@ def configure_logging(*, force: bool = False) -> None:
         timestamper,
         structlog.processors.StackInfoRenderer(),
         structlog.processors.format_exc_info,
+        _redact_sensitive_fields,
     ]
 
     structlog.configure(

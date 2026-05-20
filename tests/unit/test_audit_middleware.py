@@ -43,7 +43,17 @@ def patch_token(monkeypatch):
 
 class TestAuditMiddleware:
     async def test_on_call_tool_success_logs_start_and_success(self, _reset_structlog, patch_token):
-        patch_token(_FakeToken(claims={"sub": "user-1", "roles": ["mcp-trc-read"]}))
+        patch_token(
+            _FakeToken(
+                claims={
+                    "sub": "user-1",
+                    "upn": "user1@example.com",
+                    "oid": "oid-1",
+                    "tid": "tid-1",
+                    "roles": ["mcp-trc-read"],
+                }
+            )
+        )
         middleware = AuditMiddleware()
         ctx = _FakeContext(message=_FakeMessage(name="soma"))
 
@@ -60,11 +70,24 @@ class TestAuditMiddleware:
         success = next(e for e in events if e["event"] == "mcp.tool.call.success")
         assert success["tool"] == "soma"
         assert success["subject"] == "user-1"
+        assert success["upn"] == "user1@example.com"
+        assert success["oid"] == "oid-1"
+        assert success["tid"] == "tid-1"
         assert success["roles"] == ["mcp-trc-read"]
         assert "duration_ms" in success
 
     async def test_on_call_tool_error_logs_error_event(self, _reset_structlog, patch_token):
-        patch_token(_FakeToken(claims={"sub": "user-2", "roles": ["mcp-trc-admin"]}))
+        patch_token(
+            _FakeToken(
+                claims={
+                    "sub": "user-2",
+                    "upn": "user2@example.com",
+                    "oid": "oid-2",
+                    "tid": "tid-2",
+                    "roles": ["mcp-trc-admin"],
+                }
+            )
+        )
         middleware = AuditMiddleware()
         ctx = _FakeContext(message=_FakeMessage(name="health_check"))
 
@@ -78,6 +101,9 @@ class TestAuditMiddleware:
         assert error["tool"] == "health_check"
         assert error["error_type"] == "RuntimeError"
         assert error["subject"] == "user-2"
+        assert error["upn"] == "user2@example.com"
+        assert error["oid"] == "oid-2"
+        assert error["tid"] == "tid-2"
 
     async def test_handles_missing_token_gracefully(self, _reset_structlog, patch_token):
         patch_token(None)
@@ -92,6 +118,9 @@ class TestAuditMiddleware:
 
         success = next(e for e in events if e["event"] == "mcp.tool.call.success")
         assert success["subject"] is None
+        assert success["upn"] is None
+        assert success["oid"] is None
+        assert success["tid"] is None
         assert success["roles"] == []
 
     async def test_prefers_oid_when_sub_missing(self, _reset_structlog, patch_token):
@@ -107,9 +136,22 @@ class TestAuditMiddleware:
 
         success = next(e for e in events if e["event"] == "mcp.tool.call.success")
         assert success["subject"] == "object-id-9"
+        assert success["upn"] is None
+        assert success["oid"] == "object-id-9"
+        assert success["tid"] is None
 
     async def test_on_initialize_emits_connected_event(self, _reset_structlog, patch_token):
-        patch_token(_FakeToken(claims={"sub": "user-3", "roles": ["mcp-trc-read"]}))
+        patch_token(
+            _FakeToken(
+                claims={
+                    "sub": "user-3",
+                    "upn": "user3@example.com",
+                    "oid": "oid-3",
+                    "tid": "tid-3",
+                    "roles": ["mcp-trc-read"],
+                }
+            )
+        )
         middleware = AuditMiddleware()
         ctx = _FakeContext()
 
@@ -122,6 +164,9 @@ class TestAuditMiddleware:
         assert result == "initialized"
         connected = next(e for e in events if e["event"] == "mcp.client.connected")
         assert connected["subject"] == "user-3"
+        assert connected["upn"] == "user3@example.com"
+        assert connected["oid"] == "oid-3"
+        assert connected["tid"] == "tid-3"
         assert connected["roles"] == ["mcp-trc-read"]
 
     async def test_does_not_log_tool_arguments_or_return_value(self, _reset_structlog, patch_token):

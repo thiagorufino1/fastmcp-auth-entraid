@@ -14,6 +14,7 @@ class Settings:
     client_secret: str = ""
     base_url: str = DEFAULT_BASE_URL
     auth_mode: str = DEFAULT_AUTH_MODE
+    trust_proxy_headers: bool = False
 
 
 def _env(name: str) -> str:
@@ -21,6 +22,18 @@ def _env(name: str) -> str:
     if not value:
         raise ValueError(f"Missing required environment variable: {name}")
     return value
+
+
+def _env_bool(name: str, default: bool = False) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    normalized = raw.strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    raise ValueError(f"{name} must be a boolean value")
 
 
 @lru_cache(maxsize=1)
@@ -37,4 +50,5 @@ def load_settings() -> Settings:
         client_secret=os.getenv("AZURE_CLIENT_SECRET", "").strip(),
         base_url=base_url,
         auth_mode=auth_mode,
+        trust_proxy_headers=_env_bool("TRUST_PROXY_HEADERS", False),
     )

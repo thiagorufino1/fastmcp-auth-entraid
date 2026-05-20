@@ -25,7 +25,8 @@ classifiers = [
     "Topic :: System :: Systems Administration :: Authentication/Directory",
 ]
 dependencies = [
-    "fastmcp==3.2.0",
+    "fastmcp==3.2.4",
+    "python-dotenv>=1.2",
     "structlog>=24.4",
 ]
 

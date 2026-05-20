@@ -37,13 +37,13 @@ Alternatives considered:
 Implement Entra provisioning as a PowerShell module + orchestrator script
 under `scripts/`:
 
-- `scripts/modules/McpEntra.psm1` — reusable, idempotent helpers
+- `scripts/modules/McpEntra.psm1`: reusable, idempotent helpers
   (`New-McpAppRegistration`, `Set-McpTokenVersion2`, `Set-McpAppRoles`,
   `New-McpSecurityGroup`, etc.). Each helper checks before creating.
-- `scripts/Provision-McpEntra.ps1` — orchestrator with parameters for
+- `scripts/Provision-McpEntra.ps1`: orchestrator with parameters for
   display name, group names, output env file, and switches to skip
   client secret or admin consent.
-- `scripts/Remove-McpEntra.ps1` — teardown using
+- `scripts/Remove-McpEntra.ps1`: teardown using
   `SupportsShouldProcess` and `ConfirmImpact = High`.
 
 If, in the future, infrastructure provisioning expands to Azure Container

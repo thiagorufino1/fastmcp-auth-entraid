@@ -8,9 +8,9 @@ Accepted
 
 Microsoft Entra ID supports two authorization primitives:
 
-- **OAuth delegated scopes** (`scp` claim) — the application defines
+- **OAuth delegated scopes** (`scp` claim): the application defines
   scopes; the user (or admin) consents at sign-in time.
-- **App Roles** (`roles` claim) — the administrator assigns roles, either
+- **App Roles** (`roles` claim): the administrator assigns roles, either
   directly to users or to security groups; users cannot self-grant.
 
 For an enterprise audit and RBAC story, the difference matters:

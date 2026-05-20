@@ -11,11 +11,19 @@
 __pycache__/
 *.py[cod]
 *.pyo
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
 .venv/
 venv/
 *.egg-info/
 dist/
 build/
+*.tar.gz
+*.whl
 
 # IDE
 .vscode/

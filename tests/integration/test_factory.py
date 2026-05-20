@@ -35,7 +35,7 @@ class TestCreateMcp:
     async def test_expected_tools_registered(self, azure_env):
         mcp = create_mcp()
         tools = await mcp._list_tools()
-        assert {t.name for t in tools} == {"soma", "health_check"}
+        assert {t.name for t in tools} == {"soma", "subtracao", "multiplicacao", "divisao"}
 
     def test_audit_middleware_registered(self, azure_env):
         from app.middleware import AuditMiddleware

@@ -22,6 +22,10 @@ ENV PATH="/opt/venv/bin:${PATH}"
 COPY requirements.txt ./
 RUN pip install -r requirements.txt
 
+COPY pyproject.toml README.md ./
+COPY src ./src
+RUN pip install --no-deps .
+
 FROM python:${PYTHON_VERSION}-slim-bookworm AS runtime
 
 ARG APP_UID=10001
@@ -38,7 +42,6 @@ RUN groupadd --system --gid ${APP_GID} app \
 WORKDIR /app
 
 COPY --from=builder /opt/venv /opt/venv
-COPY --chown=app:app src/app ./app
 
 USER app
 

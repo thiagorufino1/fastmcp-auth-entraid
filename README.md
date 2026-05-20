@@ -1,588 +1,532 @@
-# 🤖 MCP Server com Autenticação Microsoft Entra ID
+# FastMCP + Microsoft Entra ID
 
-Implementação de referência de um servidor [FastMCP](https://gofastmcp.com) protegido com **Microsoft Entra ID (Azure AD)** utilizando App Roles e controle de acesso baseado em grupos de segurança.
+Implementação de referência corporativa de um servidor [FastMCP](https://gofastmcp.com) protegido com **Microsoft Entra ID (Azure AD)**, validação de JWT, controle de acesso por App Roles, middlewares de correlação e auditoria, e logs estruturados.
 
-Este projeto demonstra como:
-- 🔐 Proteger um servidor MCP com validação de JWT do Entra ID
-- 🎭 Aplicar controle de acesso por ferramenta usando App Roles
-- 👥 Gerenciar acesso via grupos de segurança do Azure AD sem alterações de código
-- 🧠 Filtrar `tools/list` para que a LLM veja apenas as ferramentas que o usuário pode executar
+O objetivo deste repositório é servir como **base reutilizável** para novos servidores MCP em ambiente corporativo. O código é pequeno e auditável, e as tools incluídas (`soma`, `subtracao`, `multiplicacao`, `divisao`) existem apenas para demonstrar o fluxo completo — não são o foco do projeto.
 
-## 🛡️ Visão geral de segurança
+## Sumário
 
-Esta seção destina-se a arquitetos de segurança que precisam avaliar a postura de segurança do projeto antes da aprovação para uso corporativo.
+- [Visão geral](#visão-geral)
+- [Principais recursos](#principais-recursos)
+- [Arquitetura](#arquitetura)
+- [Fluxo de autenticação](#fluxo-de-autenticação)
+- [Configuração do Entra ID](#configuração-do-entra-id)
+- [Configuração do projeto](#configuração-do-projeto)
+- [Estrutura de pastas](#estrutura-de-pastas)
+- [Logs e auditoria](#logs-e-auditoria)
+- [Segurança](#segurança)
+- [Tools MCP](#tools-mcp)
+- [Como reutilizar este projeto](#como-reutilizar-este-projeto)
+- [Testes e build](#testes-e-build)
+- [Execução com Docker](#execução-com-docker)
+- [Documentação complementar](#documentação-complementar)
+- [Referências](#referências)
 
-### Modelo de ameaças e mitigações
+---
 
-| Ameaça | Mitigação implementada |
-|--------|----------------------|
-| Acesso sem autenticação | Toda requisição exige JWT assinado pelo Entra ID |
-| Token forjado | Assinatura validada contra JWKS público do Entra (chaves rotacionadas pelo Azure) |
-| Token v1.0 com issuer diferente | Verifier rejeita qualquer issuer diferente de `login.microsoftonline.com` (v2.0) |
-| Usuário sem permissão conecta e enumera ferramentas | Conexão rejeitada com 401 antes de qualquer resposta MCP |
-| Usuário com permissão parcial invoca ferramenta proibida | LLM não vê a ferramenta e execução bloqueada em segunda camada |
-| Elevação de privilégio via claim manipulado | Claims vêm do JWT assinado pelo Azure, não são aceitos do cliente |
-| Token roubado reutilizado | Janela de validade de 1 hora; revogação por remoção de grupo reflete no próximo token |
-| Autoatribuição de roles pelo usuário | App Roles são atribuídas exclusivamente por administradores via Azure AD |
+## Visão geral
 
-## 🏗️ Arquitetura
+### O que é
 
-```
-Cliente MCP (portal, CLI, App Service com OBO)
-        |
-        |  Authorization: Bearer <JWT Entra ID v2.0>
-        v
-+----------------------------------------------------+
-|                  FastMCP Server                    |
-|                                                    |
-|  Camada 1: RoleEnforcedJWTVerifier                 |
-|    - valida assinatura contra JWKS do Entra        |
-|    - valida issuer, audience e versão do token     |
-|    - rejeita 401 se nenhuma role válida presente   |
-|                                                    |
-|  Camada 2: tools/list filtrado por auth=           |
-|    - LLM recebe apenas ferramentas permitidas      |
-|                                                    |
-|  Camada 3: tools/call verificado por auth=         |
-|    - execução bloqueada se role insuficiente       |
-+----------------------------------------------------+
-        |
-        |  valida JWT contra JWKS público
-        v
-  Microsoft Entra ID
-  (assinatura RS256, rotação automática de chaves)
-```
+Servidor MCP em Python (FastMCP) que expõe ferramentas (tools) sobre HTTP, com autenticação delegada ao **Microsoft Entra ID** e autorização por **App Roles**. Suporta dois modos de autenticação no mesmo binário:
 
-### Camadas de segurança em detalhe
+- **`AUTH_MODE=jwt`** — o cliente envia um Bearer token Entra ID; o servidor valida o JWT contra o JWKS público do tenant. Indicado para portais corporativos, automações, Azure Container Apps com Managed Identity e qualquer cliente que já possua um token.
+- **`AUTH_MODE=oauth`** — o servidor atua como **OAuth Proxy** para clientes interativos (Claude Desktop, Cursor, VS Code MCP). O fluxo de login no navegador é orquestrado pelo próprio FastMCP via `AzureProvider`.
 
-| Camada | Mecanismo | Resultado em falha |
-|--------|-----------|-------------------|
-| Assinatura JWT | `AzureJWTVerifier` valida RS256 contra JWKS do Entra | `401 Unauthorized` |
-| Versão do token | Exige v2.0 (`iss: login.microsoftonline.com`) | `401 Unauthorized` |
-| Audience | Valida que `aud` = `CLIENT_ID` da aplicação | `401 Unauthorized` |
-| Presença de role | `RoleEnforcedJWTVerifier` verifica claim `roles` | `401 Unauthorized` |
-| Visibilidade de ferramentas | `auth=` por ferramenta filtra `tools/list` | Ferramenta oculta da LLM |
-| Execução de ferramentas | `auth=` por ferramenta bloqueia `tools/call` | Erro de autorização MCP |
+### Problema que resolve
 
-## 🎯 Modelo de controle de acesso
+Servidores MCP costumam ser publicados sem qualquer barreira corporativa: tokens locais, escopos genéricos, sem rastreabilidade. Este projeto demonstra como entregar um MCP em produção com:
 
-O acesso é controlado via **App Roles do Azure AD atribuídas a grupos de segurança**, sendo necessárias apenas mudanças na associação de grupos para conceder ou revogar acesso, sem alterações de código.
+- Validação de token via JWKS do Entra ID (issuer, audience, expiração, assinatura).
+- RBAC baseado em **App Roles** atribuídas a **grupos de segurança** (não a usuários individuais).
+- Filtragem do `tools/list` por token: o LLM nunca enxerga uma tool que o usuário não pode executar.
+- Auditoria estruturada de cada chamada, com identidade do chamador e `request_id`.
+- Redaction automático de campos sensíveis nos logs.
 
-```
-Grupos do Azure AD            App Roles          Ferramentas
-mcp-trc-read  (grupo)  ──►  mcp-trc-read    ──►     soma
-mcp-trc-admin (grupo)  ──►  mcp-trc-admin   ──►     soma
-                                            ──►  health_check
-```
+### Por que serve como referência
 
-### Por que App Roles e não OAuth Scopes?
+- **Pequeno e auditável** — núcleo do projeto cabe em algumas centenas de linhas.
+- **Registro explícito de tools** — sem auto-discovery em produção.
+- **Separação clara** — `auth`, `middleware`, `tools` e `config` em pacotes independentes.
+- **Provisionamento versionado** — scripts PowerShell idempotentes para criar a App Registration, scopes, App Roles e grupos de segurança no Entra ID.
+- **Decisões registradas** — ADRs em `docs/adr/` documentam o porquê de cada escolha.
 
-| | OAuth Scopes (`scp`) | App Roles (`roles`) |
-|-|----------------------|---------------------|
-| Quem controla o acesso | App define, usuário consente | Admin (atribui roles aos grupos) |
-| Revogação | Usuário revoga consentimento | Admin revoga via associação de grupo |
-| Adequado para | Permissões delegadas pelo usuário | RBAC corporativo |
-| Auditável centralmente | Parcialmente | Sim, via Azure AD |
+---
 
-As App Roles aparecem como array `roles` no JWT, sem necessidade de consentimento do usuário, controlado exclusivamente pelo administrador.
+## Principais recursos
 
-### Por que o scope `access_as_user`?
+| Recurso | Onde está implementado |
+|---|---|
+| Validação de JWT do Entra ID (issuer, audience, exp, assinatura via JWKS) | `src/app/auth/verifier.py` — `RoleEnforcedJWTVerifier` |
+| OAuth Proxy (login navegador, PKCE) para clientes interativos | `src/app/auth/verifier.py` — `AzureProvider` |
+| Controle de acesso por App Roles | `src/app/auth/checks.py` — `require_roles(...)` |
+| Correlação por `request_id` (sempre gerado no servidor) | `src/app/middleware/correlation.py` |
+| Auditoria estruturada de chamadas e ciclo de vida | `src/app/middleware/audit.py` |
+| Logs JSON com redaction de campos sensíveis | `src/app/logging_config.py` |
+| Configuração 100% via variáveis de ambiente | `src/app/config.py` |
+| Registro explícito de tools (sem auto-discovery) | `src/app/tools/__init__.py` |
+| Provisionamento idempotente do Entra ID via PowerShell | `scripts/Provision-McpEntra.ps1`, `scripts/modules/McpEntra.psm1` |
+| Imagem Docker multi-stage com usuário não-root | `Dockerfile` |
 
-O fluxo delegado exige pelo menos um OAuth scope para o cliente obter um token. O scope `access_as_user` funciona como porta de entrada, permitindo que clientes se autentiquem contra a API. A autorização real (quais ferramentas chamar) é aplicada pelas App Roles, não pelo scope.
+---
 
-## 🔄 Fluxo de autenticação por requisição
+## Arquitetura
 
-```
-1. Cliente envia:  POST /mcp
-                   Authorization: Bearer <entra-jwt>
+O servidor é um ASGI app criado em `src/app/server.py`. Cada requisição HTTP percorre uma cadeia bem definida: middleware de correlação → autenticação Entra ID → middleware de auditoria → execução da tool.
 
-2. RoleEnforcedJWTVerifier executa em sequência:
-   a. Valida assinatura JWT contra endpoint JWKS do Entra
-   b. Valida issuer = https://login.microsoftonline.com/<tenant>/v2.0
-   c. Valida audience = <client-id> da aplicação
-   d. Valida que scp inclui "access_as_user"
-   e. Verifica que claim roles contém ao menos um de: mcp-trc-read, mcp-trc-admin
-   → Qualquer falha retorna 401 Unauthorized e encerra a requisição
+```mermaid
+flowchart TD
+    Client[Cliente MCP<br/>Claude Desktop / Cursor / Portal / CLI]
+    Correlation[CorrelationMiddleware<br/>request_id + client_ip]
+    Auth[AuthProvider<br/>JWT verifier ou OAuth Proxy]
+    Entra[(Microsoft Entra ID<br/>JWKS / OIDC metadata)]
+    Audit[AuditMiddleware<br/>eventos de tool/sessão]
+    Tools[Tools registradas<br/>soma / subtracao / multiplicacao / divisao]
+    AuthCheck[require_roles<br/>App Roles enforcement]
+    Logs[(stderr — JSON estruturado)]
 
-3. Cliente chama tools/list:
-   → FastMCP avalia auth= de cada ferramenta contra o claim roles do token
-   → Usuários com mcp-trc-read: recebem apenas [soma]
-   → Usuários com mcp-trc-admin: recebem [soma, health_check]
-
-4. Cliente chama tools/call:
-   → auth= verificado novamente antes da execução
-   → Chamada não autorizada retorna AuthorizationError
+    Client -- HTTP + Bearer --> Correlation
+    Correlation --> Auth
+    Auth -- valida assinatura/iss/aud --> Entra
+    Auth --> Audit
+    Audit --> AuthCheck
+    AuthCheck --> Tools
+    Correlation -. bind contextvars .-> Logs
+    Audit -. emite eventos .-> Logs
+    Auth -. emite eventos .-> Logs
 ```
 
-## 📊 Matriz de acesso por ferramenta
+### Componentes
 
-| Ferramenta | `mcp-trc-read` | `mcp-trc-admin` | Sem role |
-|------------|:--------------:|:---------------:|:--------:|
-| `soma` | ✅ visível + executável | ✅ visível + executável | ❌ 401 na conexão |
-| `health_check` | ❌ oculta da LLM | ✅ visível + executável | ❌ 401 na conexão |
+- **`server.py`** — fábrica `create_mcp()` monta a instância `FastMCP` com o provider de auth e o middleware de auditoria; `create_http_app()` envolve em ASGI e adiciona o middleware de correlação.
+- **`config.py`** — `Settings` imutável carregado de variáveis de ambiente; `ALLOWED_ROLES` é o conjunto autorizativo (`mcp-trc-read`, `mcp-trc-admin`).
+- **`auth/`** — `build_auth_provider()` decide entre `RemoteAuthProvider + RoleEnforcedJWTVerifier` (modo `jwt`) e `AzureProvider` (modo `oauth`). `require_roles()` é o `AuthCheck` aplicado por tool.
+- **`middleware/correlation.py`** — gera `request_id`, ignora qualquer `X-Request-ID` de entrada, propaga via `structlog.contextvars`, devolve no header de resposta.
+- **`middleware/audit.py`** — emite `mcp.client.connected`, `mcp.tool.call.start/success/error` com identidade do chamador e duração.
+- **`tools/`** — cada tool em um arquivo; registro centralizado em `__init__.py:register_tools()`.
+- **`logging_config.py`** — configura `structlog` com JSONRenderer, timestamp ISO UTC e redaction de chaves sensíveis.
+- **`__main__.py`** — entrypoint; carrega `.env`, configura logging e sobe `uvicorn`.
 
-A LLM nunca vê ferramentas que o usuário não pode executar, eliminando tentativas de invocação não autorizada.
+### Onde cada coisa acontece
 
-## 🔀 Modos de autenticação
+| Etapa | Componente |
+|---|---|
+| Cliente envia `Authorization: Bearer <jwt>` | — |
+| Geração de `request_id`, bind no contexto de log | `CorrelationMiddleware` |
+| Download/cache de JWKS, validação de assinatura, issuer, audience, expiração | `RoleEnforcedJWTVerifier` (herda `AzureJWTVerifier`) |
+| Rejeição de tokens sem App Role autorizada (`auth.token.rejected`) | `RoleEnforcedJWTVerifier.verify_token` |
+| Filtragem do `tools/list` por token e enforcement em `tools/call` | `Tool(auth=require_roles(...))` |
+| Auditoria da chamada (start/success/error + duração) | `AuditMiddleware.on_call_tool` |
+| Execução da função Python da tool | `src/app/tools/<nome>.py` |
+| Resposta HTTP com header `X-Request-ID` | `CorrelationMiddleware` |
 
-O FastMCP suporta dois modos, alternados via `AUTH_MODE` no `.env`. O controle de acesso via App Roles e grupos funciona identicamente nos dois modos.
+---
 
-> ⚠️ Apenas um modo pode estar ativo por instância do servidor.
+## Fluxo de autenticação
 
-### Modo A: JWT Verifier (`AUTH_MODE=jwt`) — padrão recomendado para ACA
+### Modo `jwt` (recomendado para automações e portais)
 
+O cliente é responsável por obter o token (via MSAL, Managed Identity, On-Behalf-Of, etc.) e enviá-lo no header `Authorization: Bearer <token>`.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Client as Cliente MCP
+    participant MCP as FastMCP Server
+    participant Verifier as RoleEnforcedJWTVerifier
+    participant Entra as Entra ID (login.microsoftonline.com)
+
+    Client->>Entra: (fora do servidor) obtém access_token
+    Client->>MCP: POST /mcp com Authorization: Bearer <jwt>
+    MCP->>Verifier: verify_token(jwt)
+    Verifier->>Entra: GET /{tenant}/discovery/v2.0/keys (JWKS, cacheado)
+    Verifier->>Verifier: valida assinatura, issuer, audience, exp, nbf
+    Verifier->>Verifier: exige scope access_as_user
+    Verifier->>Verifier: exige roles ∈ {mcp-trc-read, mcp-trc-admin}
+    alt Token inválido ou sem role
+        Verifier-->>MCP: None  →  emite auth.token.rejected
+        MCP-->>Client: 401 Unauthorized
+    else Token válido
+        Verifier-->>MCP: AccessToken (claims, roles)
+        MCP->>MCP: AuditMiddleware → require_roles → tool
+        MCP-->>Client: 200 OK (resultado MCP)
+    end
 ```
-Usuário → [obtém token Azure externamente] → Cliente MCP → FastMCP (valida JWT)
+
+**Claims verificadas**
+
+| Claim | Verificação |
+|---|---|
+| `iss` | `https://login.microsoftonline.com/{AZURE_TENANT_ID}/v2.0` |
+| `aud` | `api://{AZURE_CLIENT_ID}` (token v2) |
+| `exp`, `nbf` | Janela de tempo válida |
+| Assinatura | Chave pública JWKS do tenant |
+| `scp` | Inclui `access_as_user` |
+| `roles` | Interseção não vazia com `{mcp-trc-read, mcp-trc-admin}` |
+
+### Modo `oauth` (recomendado para Claude Desktop / Cursor / VS Code)
+
+O servidor expõe os endpoints OAuth (`/authorize`, `/token`, `/.well-known/...`) e age como proxy para o Entra ID. O cliente MCP descobre o servidor de autorização e dispara o fluxo no navegador.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Client as Cliente MCP (Claude/Cursor)
+    participant Browser as Navegador
+    participant MCP as FastMCP (AzureProvider)
+    participant Entra as Entra ID
+
+    Client->>MCP: GET /.well-known/oauth-authorization-server
+    MCP-->>Client: metadata (authorize/token endpoints do MCP)
+    Client->>Browser: abre URL de /authorize do MCP (PKCE)
+    Browser->>MCP: GET /authorize?...
+    MCP->>Entra: redireciona para login.microsoftonline.com
+    Entra-->>Browser: tela de login + consent
+    Browser->>MCP: /callback com code
+    MCP->>Entra: troca code por access_token (client_secret)
+    Entra-->>MCP: access_token (claims, roles)
+    MCP-->>Client: emite token MCP
+    Client->>MCP: chamadas MCP com Bearer
+    MCP->>MCP: enforcement de App Roles (mesmo que no modo jwt)
 ```
 
-O cliente obtém token do Entra ID diretamente (via OBO, MSAL, Azure CLI) e envia como Bearer. O FastMCP apenas valida, sem redirecionar nem emitir tokens.
+Esse modo exige `AZURE_CLIENT_SECRET` configurado. Para produção, mantenha o secret no **Azure Key Vault** e injete via Managed Identity.
 
-Indicado para: portais customizados, App Service com OBO, Azure Container Apps, automações.
+### Falhas tratadas
 
-Como obter token para testes:
+| Situação | Comportamento | Evento de log |
+|---|---|---|
+| JWT mal formado, assinatura inválida, expirado | `verify_token` retorna `None`, request falha 401 | `auth.token.invalid` |
+| JWT válido sem App Role permitida | `verify_token` retorna `None`, request falha 401 | `auth.token.rejected` (com `subject`, `token_roles`) |
+| JWT válido com pelo menos uma role permitida | Prossegue | `auth.token.accepted` (com `subject`, `granted_roles`) |
+| Chamada de tool com role insuficiente | `tools/list` oculta a tool; `tools/call` retorna erro de autorização | — |
+| `AUTH_MODE=oauth` sem `AZURE_CLIENT_SECRET` | Startup falha com `ValueError` | — |
+
+---
+
+## Configuração do Entra ID
+
+O provisionamento completo é automatizado em [`scripts/Provision-McpEntra.ps1`](scripts/Provision-McpEntra.ps1). O detalhamento operacional está em [`scripts/provisioning.md`](scripts/provisioning.md). Esta seção resume o que é criado e por quê.
+
+### Recursos provisionados
+
+1. **App Registration** — `signInAudience=AzureADMyOrg`, identifier URI `api://<client-id>`, `requestedAccessTokenVersion=2` (rejeita tokens v1).
+2. **OAuth scope** `access_as_user` — delegado, consentido pelo usuário. Não carrega autorização por si só; é o gate para emissão de token.
+3. **App Roles** `mcp-trc-read` e `mcp-trc-admin` — atribuíveis a `User` e `Application` (para Managed Identity / OBO). Esses nomes são também os valores em `claims.roles`.
+4. **Service Principal** — habilita sign-ins para a App Registration.
+5. **Client Secret** (opcional, `-SkipClientSecret` para pular) — obrigatório só em `AUTH_MODE=oauth`.
+6. **Admin Consent** — `AllPrincipals` para `access_as_user` (requer Privileged Role Administrator).
+7. **Security Groups** `mcp-trc-read`, `mcp-trc-admin` — atribuídos às App Roles correspondentes.
+
+### Quick start
 
 ```powershell
-az account get-access-token `
-  --scope "api://<CLIENT_ID>/access_as_user" `
-  --query accessToken -o tsv
+az login --tenant <TENANT_ID>
+./scripts/Provision-McpEntra.ps1 -TenantId <TENANT_ID> -OutEnvFile .env
 ```
 
-### Modo B: OAuth Proxy (`AUTH_MODE=oauth`)
+O script grava um bloco `.env` com `AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET` (se gerado) e `MCP_BASE_URL`. Trate esse arquivo como secret.
 
-```
-Usuário → Cliente MCP → FastMCP (redireciona para login Azure) → Azure → FastMCP → Cliente
-```
+### Acesso de um novo usuário
 
-FastMCP atua como servidor de autorização OAuth, fazendo proxy do login para o Entra ID. Browser abre automaticamente para login. O cliente não precisa gerenciar tokens manualmente.
-
-Indicado para: Claude Desktop, Cursor, extensões VS Code, qualquer cliente com suporte OAuth 2.0 nativo.
-
-Requer registro de redirect URI no App Registration:
+Atribuir uma role a um usuário = adicionar o usuário ao grupo correspondente:
 
 ```powershell
-# Desenvolvimento local
-az ad app update --id <CLIENT_ID> `
-  --web-redirect-uris "http://localhost:8000/auth/callback"
-
-# Produção (ACA)
-az ad app update --id <CLIENT_ID> `
-  --web-redirect-uris "https://<seu-app>.azurecontainerapps.io/auth/callback"
+$USER_OID = az ad user show --id user@example.com --query id -o tsv
+az ad group member add --group <object-id-do-grupo-mcp-trc-read> --member-id $USER_OID
 ```
 
-Endpoints publicados automaticamente pelo FastMCP no modo oauth:
+O efeito é visível **no próximo token emitido** (~1 hora por padrão). Para revogação imediata, habilite [Continuous Access Evaluation](https://learn.microsoft.com/entra/identity/conditional-access/concept-continuous-access-evaluation).
 
-```
-/.well-known/oauth-authorization-server       metadados do servidor OAuth
-/.well-known/oauth-protected-resource/mcp    metadados do recurso protegido
-/auth/callback                                callback do fluxo de autorização
-```
+---
 
-### Comparativo dos modos
+## Configuração do projeto
 
-| | JWT Verifier (`jwt`) | OAuth Proxy (`oauth`) |
-|-|----------------------|-----------------------|
-| Emissor do token | Microsoft Entra ID | FastMCP via proxy do Entra |
-| Requisito do cliente | Deve fornecer Bearer token | Deve suportar OAuth 2.0 |
-| App Roles e grupos AD | ✅ | ✅ |
-| `client_secret` obrigatório | ❌ | ✅ |
-| Redirect URI no App Registration | ❌ | ✅ |
-| Fluxo de login via browser | ❌ externo | ✅ nativo |
-| Azure Container Apps com MI | ✅ ideal | ⚠️ mais complexo |
-| Aquisição de token | Cliente/orchestrador (automatizável via MSAL/MI/OBO) | Automática |
+### Variáveis de ambiente
 
-Para alternar entre modos, edite `AUTH_MODE` no `.env` e reinicie o servidor. Nenhuma alteração de código é necessária.
+| Variável | Obrigatória | Default | Descrição |
+|---|---|---|---|
+| `AZURE_TENANT_ID` | sim | — | Tenant ID do Entra ID. |
+| `AZURE_CLIENT_ID` | sim | — | Application (client) ID da App Registration. |
+| `AZURE_CLIENT_SECRET` | só em `AUTH_MODE=oauth` | — | Client secret. Em produção, leia do Key Vault. |
+| `AUTH_MODE` | não | `jwt` | `jwt` ou `oauth`. |
+| `MCP_BASE_URL` | não | `http://localhost:8000` | URL pública do servidor (usada na descoberta OAuth). |
+| `TRUST_PROXY_HEADERS` | não | `false` | Quando `true`, lê `X-Forwarded-For` para `client_ip`. Habilite apenas atrás de proxy confiável. |
+| `LOG_LEVEL` | não | `INFO` | `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`. |
+| `MCP_HOST` | não | `0.0.0.0` | Bind address do uvicorn. |
+| `MCP_PORT` | não | `8000` | Porta do uvicorn. |
 
-## 📁 Estrutura do projeto
+Veja [`.env.example`](.env.example).
 
-```
-mcp-container-apps/
-├── .env                   # segredos (nunca commitar)
-├── .env.example           # template com documentação
-├── requirements.txt
-└── app/
-    ├── __init__.py
-    ├── __main__.py        # ponto de entrada: python -m app
-    ├── main.py            # montagem do servidor
-    ├── config.py          # variáveis de ambiente + constantes de roles
-    ├── auth/
-    │   ├── __init__.py
-    │   ├── verifier.py    # RoleEnforcedJWTVerifier, build_auth_provider()
-    │   └── checks.py      # fábrica de AuthCheck require_roles()
-    └── tools/
-        ├── __init__.py    # register_tools()
-        ├── health.py      # health_check, exige mcp-trc-admin
-        └── soma.py        # soma, exige mcp-trc-read ou mcp-trc-admin
-```
-
-## ✅ Pré-requisitos
-
-- Python 3.11+
-- Azure CLI (`az`): [guia de instalação](https://learn.microsoft.com/pt-br/cli/azure/install-azure-cli)
-- Tenant Azure com permissão para criar App Registrations e grupos de segurança
-
-## 🔧 Passo 1: App Registration no Azure
-
-### 1.1 Login
-
-```bash
-az login --tenant "<SEU_TENANT_ID>"
-```
-
-### 1.2 Criar o App Registration
-
-```bash
-APP=$(az ad app create \
-  --display-name "mcp-lab" \
-  --sign-in-audience AzureADMyOrg \
-  --query "{appId:appId, objectId:id}" \
-  -o json)
-
-CLIENT_ID=$(echo $APP | jq -r '.appId')
-OBJECT_ID=$(echo $APP | jq -r '.objectId')
-```
-
-PowerShell:
+### Instalação local
 
 ```powershell
-$APP = az ad app create --display-name "mcp-lab" --sign-in-audience AzureADMyOrg --query "{appId:appId, objectId:id}" -o json | ConvertFrom-Json
-$CLIENT_ID = $APP.appId
-$OBJECT_ID = $APP.objectId
-```
-
-### 1.3 Definir URI identificador e versão do token
-
-O URI identificador (`api://<client-id>`) é obrigatório para scopes customizados e App Roles. A versão do token deve ser `2` para que o issuer seja `login.microsoftonline.com` (v2.0). Tokens v1.0 usam `sts.windows.net` como issuer e são rejeitados pelo verifier.
-
-```powershell
-az ad app update --id $CLIENT_ID --identifier-uris "api://$CLIENT_ID"
-
-$body = '{"api":{"requestedAccessTokenVersion":2}}'
-$body | Out-File "$env:TEMP\tokenver.json" -Encoding utf8 -NoNewline
-az rest --method PATCH `
-  --uri "https://graph.microsoft.com/v1.0/applications/$OBJECT_ID" `
-  --headers "Content-Type=application/json" `
-  --body "@$env:TEMP\tokenver.json"
-```
-
-### 1.4 Adicionar o scope `access_as_user`
-
-Este scope delegado permite que clientes solicitem tokens para esta API. Ele não concede acesso às ferramentas; isso é controlado exclusivamente pelas App Roles.
-
-```powershell
-$SCOPE_ID = [System.Guid]::NewGuid().ToString()
-$body = @"
-{
-  "api": {
-    "oauth2PermissionScopes": [{
-      "adminConsentDescription": "Acessar mcp-lab como o usuário autenticado",
-      "adminConsentDisplayName": "Acessar mcp-lab",
-      "id": "$SCOPE_ID",
-      "isEnabled": true,
-      "type": "User",
-      "userConsentDescription": "Acessar mcp-lab em seu nome",
-      "userConsentDisplayName": "Acessar mcp-lab",
-      "value": "access_as_user"
-    }]
-  }
-}
-"@
-$body | Out-File "$env:TEMP\scope.json" -Encoding utf8 -NoNewline
-az rest --method PATCH `
-  --uri "https://graph.microsoft.com/v1.0/applications/$OBJECT_ID" `
-  --headers "Content-Type=application/json" `
-  --body "@$env:TEMP\scope.json"
-```
-
-### 1.5 Criar App Roles
-
-As App Roles são atribuídas por administradores e aparecem no claim `roles` do JWT. Usuários não podem autoatribuí-las, sendo essa a diferença fundamental em relação a OAuth Scopes.
-
-```powershell
-$ROLE_READ_ID  = [System.Guid]::NewGuid().ToString()
-$ROLE_ADMIN_ID = [System.Guid]::NewGuid().ToString()
-
-$body = @"
-{
-  "appRoles": [
-    {
-      "allowedMemberTypes": ["User", "Application"],
-      "description": "Acesso de leitura às ferramentas MCP",
-      "displayName": "MCP Read",
-      "id": "$ROLE_READ_ID",
-      "isEnabled": true,
-      "value": "mcp-trc-read"
-    },
-    {
-      "allowedMemberTypes": ["User", "Application"],
-      "description": "Acesso administrativo às ferramentas MCP",
-      "displayName": "MCP Admin",
-      "id": "$ROLE_ADMIN_ID",
-      "isEnabled": true,
-      "value": "mcp-trc-admin"
-    }
-  ]
-}
-"@
-$body | Out-File "$env:TEMP\approles.json" -Encoding utf8 -NoNewline
-az rest --method PATCH `
-  --uri "https://graph.microsoft.com/v1.0/applications/$OBJECT_ID" `
-  --headers "Content-Type=application/json" `
-  --body "@$env:TEMP\approles.json"
-```
-
-### 1.6 Criar Service Principal e client secret
-
-```powershell
-az ad sp create --id $CLIENT_ID
-
-$SECRET    = az ad app credential reset --id $CLIENT_ID --years 1 --query "password" -o tsv
-$TENANT_ID = az account show --query tenantId -o tsv
-```
-
-> ⚠️ Em produção, o `client_secret` deve ser armazenado no Azure Key Vault e acessado via Managed Identity. Nunca persista em arquivos de configuração ou variáveis de ambiente em disco.
-
-### 1.7 Conceder consentimento administrativo para `access_as_user`
-
-```powershell
-$SP_ID = az ad sp show --id $CLIENT_ID --query id -o tsv
-
-$body = @"
-{
-  "clientId": "$SP_ID",
-  "consentType": "AllPrincipals",
-  "resourceId": "$SP_ID",
-  "scope": "access_as_user"
-}
-"@
-$body | Out-File "$env:TEMP\consent.json" -Encoding utf8 -NoNewline
-az rest --method POST `
-  --uri "https://graph.microsoft.com/v1.0/oauth2PermissionGrants" `
-  --headers "Content-Type=application/json" `
-  --body "@$env:TEMP\consent.json"
-```
-
-> ⚠️ `consentType: AllPrincipals` concede consentimento em nome de todos os usuários do tenant. Os usuários não verão tela de consentimento ao autenticar. Esta ação requer privilégios de Global Administrator ou Privileged Role Administrator.
-
-## 👥 Passo 2: Grupos de Segurança no Azure AD
-
-O acesso é gerenciado exclusivamente via grupos de segurança. Administradores adicionam ou removem usuários dos grupos sem qualquer alteração de código ou no App Registration.
-
-### 2.1 Criar os grupos
-
-```powershell
-$GROUP_READ_ID  = (az rest --method POST --uri "https://graph.microsoft.com/v1.0/groups" `
-  --headers "Content-Type=application/json" `
-  --body '{"displayName":"mcp-trc-read","mailEnabled":false,"mailNickname":"mcp-trc-read","securityEnabled":true}' `
-  -o json | ConvertFrom-Json).id
-
-$GROUP_ADMIN_ID = (az rest --method POST --uri "https://graph.microsoft.com/v1.0/groups" `
-  --headers "Content-Type=application/json" `
-  --body '{"displayName":"mcp-trc-admin","mailEnabled":false,"mailNickname":"mcp-trc-admin","securityEnabled":true}' `
-  -o json | ConvertFrom-Json).id
-```
-
-### 2.2 Atribuir App Roles aos grupos
-
-```powershell
-$body = "{`"principalId`":`"$GROUP_READ_ID`",`"resourceId`":`"$SP_ID`",`"appRoleId`":`"$ROLE_READ_ID`"}"
-az rest --method POST `
-  --uri "https://graph.microsoft.com/v1.0/groups/$GROUP_READ_ID/appRoleAssignments" `
-  --headers "Content-Type=application/json" --body $body
-
-$body = "{`"principalId`":`"$GROUP_ADMIN_ID`",`"resourceId`":`"$SP_ID`",`"appRoleId`":`"$ROLE_ADMIN_ID`"}"
-az rest --method POST `
-  --uri "https://graph.microsoft.com/v1.0/groups/$GROUP_ADMIN_ID/appRoleAssignments" `
-  --headers "Content-Type=application/json" --body $body
-```
-
-Para verificar e gerenciar atribuições via portal:
-**Azure AD → Enterprise Applications → mcp-lab → Users and groups**
-
-### 2.3 Gerenciar membros dos grupos
-
-```powershell
-# Adicionar usuário ao grupo
-$USER_OID = "<object-id-do-usuario>"
-$body = "{`"@odata.id`":`"https://graph.microsoft.com/v1.0/directoryObjects/$USER_OID`"}"
-az rest --method POST `
-  --uri "https://graph.microsoft.com/v1.0/groups/$GROUP_ADMIN_ID/members/`$ref" `
-  --headers "Content-Type=application/json" --body $body
-
-# Remover usuário do grupo
-az rest --method DELETE `
-  --uri "https://graph.microsoft.com/v1.0/groups/$GROUP_ADMIN_ID/members/$USER_OID/`$ref"
-```
-
-> ⚠️ A revogação de acesso reflete no próximo token emitido, normalmente em até 1 hora. Para ambientes que exigem revogação imediata, avaliar Continuous Access Evaluation (CAE) do Entra ID.
-
-## ⚙️ Passo 3: Configuração do projeto
-
-### 3.1 Instalar dependências
-
-```bash
 python -m venv .venv
-
-# Windows
-.venv\Scripts\activate
-
-# Linux/Mac
-source .venv/bin/activate
-
-pip install -r requirements.txt
+.venv\Scripts\Activate.ps1
+python -m pip install -U pip
+python -m pip install -e ".[dev]"
 ```
 
-### 3.2 Configurar variáveis de ambiente
+### Subir o servidor
 
-```bash
-cp .env.example .env
-```
-
-Edite o arquivo `.env`:
-
-```env
-AZURE_CLIENT_ID=<client-id-do-app-registration>
-AZURE_CLIENT_SECRET=<client-secret>
-AZURE_TENANT_ID=<tenant-id>
-MCP_BASE_URL=http://localhost:8000
-
-# Modo de autenticação: jwt (padrão) | oauth
-AUTH_MODE=jwt
-```
-
-> ⚠️ Nunca comite o arquivo `.env` no controle de versão. Adicione ao `.gitignore`. Em produção, use variáveis de ambiente do Azure Container Apps ou referências ao Key Vault. O `AZURE_CLIENT_SECRET` é necessário apenas no `AUTH_MODE=oauth`.
-
-### 3.3 Executar
-
-```bash
+```powershell
 python -m app
 ```
 
-O servidor sobe em `http://0.0.0.0:8000/mcp`.
+O entrypoint (`src/app/__main__.py`) carrega `.env` da CWD, configura logging e inicia `uvicorn`. O servidor responde em `http://localhost:8000/mcp/` (rota padrão do FastMCP HTTP transport).
 
-## 🔑 Passo 4: Obter token para testes
+### Validar autenticação
+
+Sem token — deve retornar 401:
 
 ```powershell
-az login --tenant "<TENANT_ID>"
-
-az account get-access-token `
-  --scope "api://<CLIENT_ID>/access_as_user" `
-  --query accessToken -o tsv
+curl -i http://localhost:8000/mcp/
 ```
 
-Utilize o token como header Bearer no cliente MCP:
+Com token válido (substitua `<JWT>`):
 
+```powershell
+curl -s -H "Authorization: Bearer <JWT>" http://localhost:8000/mcp/tools/list
 ```
-Authorization: Bearer <token>
+
+Os eventos correspondentes (`auth.token.accepted`, `mcp.client.connected`) aparecem em stderr no formato JSON.
+
+---
+
+## Estrutura de pastas
+
+```text
+.
+├── src/app/
+│   ├── __main__.py          # entrypoint: load_dotenv, configure_logging, uvicorn.run
+│   ├── server.py            # create_mcp / create_http_app
+│   ├── config.py            # Settings, ALLOWED_ROLES, load_settings()
+│   ├── logging_config.py    # structlog JSON + redaction de campos sensíveis
+│   ├── auth/
+│   │   ├── verifier.py      # RoleEnforcedJWTVerifier + build_auth_provider
+│   │   └── checks.py        # require_roles(...) — AuthCheck por tool
+│   ├── middleware/
+│   │   ├── correlation.py   # request_id + client_ip via contextvars
+│   │   └── audit.py         # eventos de sessão e tool calls
+│   └── tools/
+│       ├── __init__.py      # register_tools(mcp) — registro explícito
+│       ├── soma.py
+│       ├── subtracao.py
+│       ├── multiplicacao.py
+│       └── divisao.py
+├── tests/
+│   ├── unit/                # config, verifier, middleware, logging, tools
+│   └── integration/         # factory + wiring
+├── scripts/
+│   ├── Provision-McpEntra.ps1
+│   ├── Remove-McpEntra.ps1
+│   ├── modules/McpEntra.psm1
+│   └── provisioning.md
+├── docs/
+│   ├── architecture.md
+│   └── adr/                 # decisões arquiteturais (0001..0005)
+├── Dockerfile
+├── pyproject.toml
+├── requirements.txt
+├── .env.example
+└── README.md
 ```
 
-Os tokens expiram em aproximadamente 1 hora. Execute `az account get-access-token` novamente para renovar sem novo login.
+| Diretório | Responsabilidade |
+|---|---|
+| `src/app/auth/` | Tudo relacionado à validação de token e autorização por App Roles. |
+| `src/app/middleware/` | Correlação e auditoria. Nada de negócio. |
+| `src/app/tools/` | Definição e registro de tools. **Único lugar para adicionar nova tool.** |
+| `scripts/` | Provisionamento Entra ID (PowerShell idempotente). |
+| `docs/adr/` | Registro imutável de decisões arquiteturais. |
+| `tests/unit/` | Testes isolados por módulo. |
+| `tests/integration/` | Wiring do app completo (factory + middleware). |
 
-## ➕ Adicionando novas ferramentas
+---
 
-Crie `app/tools/minha_ferramenta.py`:
+## Logs e auditoria
+
+### Pipeline de logs
+
+`logging_config.configure_logging()` configura `structlog` com:
+
+- Saída **JSON em stderr** (`structlog.processors.JSONRenderer`).
+- Timestamp **ISO 8601 UTC**.
+- **Redaction automática** de chaves sensíveis (`authorization`, `access_token`, `client_secret`, `id_token`, `password`, `refresh_token`, `secret`, `token`) → substituídas por `[REDACTED]`.
+- **Bridge stdlib** — logs de `uvicorn`, `fastmcp` e bibliotecas terceiras também saem em JSON.
+- Bind via `contextvars` — `request_id`, `client_ip` e `client_session` são propagados automaticamente.
+
+### Eventos emitidos
+
+| Evento | Quando | Campos relevantes |
+|---|---|---|
+| `auth.token.invalid` | JWT mal formado, assinatura/expiração inválidas | — |
+| `auth.token.rejected` | JWT válido sem App Role permitida | `subject`, `token_roles`, `reason` |
+| `auth.token.accepted` | JWT válido com role permitida | `subject`, `granted_roles` |
+| `mcp.client.connected` | Início de sessão MCP | `subject`, `upn`, `oid`, `tid`, `roles`, `client_session` |
+| `mcp.tool.call.start` | Início da execução de uma tool | `tool`, `roles`, identidade |
+| `mcp.tool.call.success` | Tool retornou com sucesso | `tool`, `duration_ms`, identidade |
+| `mcp.tool.call.error` | Tool levantou exceção | `tool`, `error_type`, `duration_ms` |
+
+### O que **não** é logado
+
+- Argumentos das tools.
+- Valores retornados pelas tools.
+- Tokens (Bearer ou refresh).
+- Client secret.
+- Qualquer chave da lista de campos sensíveis.
+
+A ausência desses dados é validada por testes em `tests/unit/test_audit_middleware.py` e `tests/unit/test_verifier_logging.py`.
+
+### Correlação
+
+- `request_id` é **sempre** gerado pelo servidor (UUID v4). Um `X-Request-ID` enviado pelo cliente é ignorado.
+- O id é devolvido no header `X-Request-ID` da resposta.
+- Todo log emitido durante a request carrega `request_id` automaticamente.
+- `client_ip` vem do `scope.client` por padrão; só lê `X-Forwarded-For` quando `TRUST_PROXY_HEADERS=true`.
+
+---
+
+## Segurança
+
+### Controles implementados
+
+- **Validação completa de JWT** — assinatura via JWKS do tenant, issuer (`https://login.microsoftonline.com/{tenant}/v2.0`), audience (`api://{client_id}`), expiração, `nbf`.
+- **Token v2 obrigatório** — `requestedAccessTokenVersion=2` na App Registration; tokens v1 são rejeitados.
+- **App Roles em vez de scopes** — autorização exige claim `roles` com interseção em `{mcp-trc-read, mcp-trc-admin}`. Usuários não podem se auto-conceder.
+- **Filtragem de `tools/list`** — o LLM nunca enxerga uma tool fora do seu role set, eliminando uma classe de prompt-injection.
+- **Enforcement duplo** — `tools/list` filtra; `tools/call` re-valida via `require_roles`.
+- **Segredos por variável de ambiente** — nada hardcoded; produção usa Key Vault + Managed Identity.
+- **Container não-root** — UID/GID 10001 no `Dockerfile`.
+- **Sanitização de logs** — campos sensíveis substituídos por `[REDACTED]` antes do `JSONRenderer`.
+- **`X-Request-ID` server-side** — cliente não consegue forjar correlação.
+- **`X-Forwarded-For` opt-in** — `TRUST_PROXY_HEADERS=false` por padrão.
+
+### Boas práticas operacionais
+
+- Atribua App Roles a **grupos de segurança**, não a usuários individuais.
+- Em produção, habilite **Continuous Access Evaluation** para revogação imediata.
+- Mantenha `AZURE_CLIENT_SECRET` no Key Vault; rotacione com frequência.
+- Não comite `.env` (já no `.gitignore`).
+- Reveja os eventos `auth.token.rejected` no Log Analytics — picos podem indicar tentativas de acesso indevido.
+- Atualize as dependências do `requirements.txt` regularmente; `pip-audit` está disponível em `[lint]`.
+
+Reportar vulnerabilidades: ver [`SECURITY.md`](SECURITY.md).
+
+---
+
+## Tools MCP
+
+As quatro tools incluídas (`soma`, `subtracao`, `multiplicacao`, `divisao`) seguem o **mesmo template** para servir de exemplo replicável. Cada uma:
+
+- mora em um arquivo próprio em `src/app/tools/`,
+- expõe entrada simples com tipos primitivos,
+- define `ToolAnnotations` e `output_schema` explícitos,
+- aplica `auth=require_roles("mcp-trc-read", "mcp-trc-admin")`.
+
+O registro é **explícito** em `src/app/tools/__init__.py`:
 
 ```python
-from fastmcp.tools.base import Tool
-from ..auth import require_roles
+from fastmcp import FastMCP
+from .divisao import divisao
+from .multiplicacao import multiplicacao
+from .soma import soma
+from .subtracao import subtracao
 
-
-def _minha_ferramenta(parametro: str) -> dict:
-    """Descrição do que a ferramenta faz."""
-    return {"resultado": parametro}
-
-
-minha_ferramenta: Tool = Tool.from_function(
-    _minha_ferramenta,
-    name="minha_ferramenta",
-    auth=require_roles("mcp-trc-read"),
-)
-```
-
-Registre em `app/tools/__init__.py`:
-
-```python
-from .minha_ferramenta import minha_ferramenta
 
 def register_tools(mcp: FastMCP) -> None:
-    mcp.add_tool(health_check)
     mcp.add_tool(soma)
-    mcp.add_tool(minha_ferramenta)
+    mcp.add_tool(subtracao)
+    mcp.add_tool(multiplicacao)
+    mcp.add_tool(divisao)
 ```
 
-Nenhuma alteração na infraestrutura de autenticação é necessária.
+### Adicionar uma nova tool
 
-## 🏭 Considerações para produção (Azure Container Apps)
+1. Crie `src/app/tools/<nome>.py` copiando a estrutura de `soma.py`.
+2. Defina `Tool.from_function(...)` com `name`, `title`, `description`, `annotations`, `output_schema` e `auth=require_roles(...)`.
+3. Importe a tool em `src/app/tools/__init__.py` e adicione `mcp.add_tool(<nome>)` em `register_tools`.
+4. Cubra com teste em `tests/unit/test_arithmetic_tools.py` (mesmo padrão) e atualize `tests/unit/test_tool_registration.py` se necessário.
 
-O Azure Container Apps resolve automaticamente parte dos requisitos de segurança corporativa:
+---
 
-| Requisito | Solução no ACA |
-|-----------|----------------|
-| TLS/HTTPS | Ingress com certificado gerenciado automaticamente |
-| Segredos | ACA Secrets ou Key Vault reference com Managed Identity |
-| Logs | stdout capturado automaticamente pelo Log Analytics |
-| Scaling | Configurável via regras de escala do ACA |
+## Como reutilizar este projeto
 
-Variáveis de ambiente recomendadas no ACA (sem `.env`):
+Para começar um novo servidor MCP corporativo a partir deste repositório:
 
+| Quero alterar… | Edite… |
+|---|---|
+| Nome do projeto, dependências, metadata | `pyproject.toml`, `README.md` |
+| App Roles permitidas | `ALLOWED_ROLES` em `src/app/config.py` e os nomes em `scripts/Provision-McpEntra.ps1` |
+| Tenant/App padrão para dev | `.env` (nunca comite) |
+| Tools expostas | substitua os arquivos em `src/app/tools/` e atualize `register_tools` |
+| Eventos de auditoria adicionais | `src/app/middleware/audit.py` |
+| Campos sensíveis a redigir | `_SENSITIVE_KEYS` em `src/app/logging_config.py` |
+| Middleware adicional (rate limit, CSP, etc.) | adicione em `create_http_app` em `src/app/server.py` |
+| Modo OAuth scopes específicos | `required_scopes` / `additional_authorize_scopes` em `src/app/auth/verifier.py` |
+| Provisionamento Entra ID | `scripts/modules/McpEntra.psm1` (helpers) e `scripts/Provision-McpEntra.ps1` |
+
+Arquivos que **sempre** devem ser revisados num novo fork:
+
+- `pyproject.toml` — nome, descrição, URLs.
+- `src/app/config.py` — `ALLOWED_ROLES` precisa refletir as roles do seu domínio.
+- `scripts/Provision-McpEntra.ps1` — defaults de display name e nomes de grupo.
+- `SECURITY.md` — canal de report.
+- `.github/CODEOWNERS` (se aplicável) — donos do código.
+
+---
+
+## Testes e build
+
+```powershell
+pytest -q
+ruff check .
+mypy
+python -m build
 ```
-AZURE_CLIENT_ID     variável de ambiente do ACA
-AZURE_TENANT_ID     variável de ambiente do ACA
-MCP_BASE_URL        https://<seu-app>.azurecontainerapps.io
-AUTH_MODE           jwt
-AZURE_CLIENT_SECRET referência ao Key Vault (apenas se AUTH_MODE=oauth)
+
+A suite cobre `Settings`, `RoleEnforcedJWTVerifier` (aceitação, rejeição, logging sem vazamento), `AuditMiddleware`, `CorrelationMiddleware`, configuração de logs e a fábrica HTTP.
+
+---
+
+## Execução com Docker
+
+```powershell
+docker build -t fastmcp-auth-entraid .
+docker run --rm -p 8000:8000 `
+  -e AUTH_MODE=jwt `
+  -e AZURE_TENANT_ID=<tenant-id> `
+  -e AZURE_CLIENT_ID=<client-id> `
+  -e MCP_BASE_URL=http://localhost:8000 `
+  fastmcp-auth-entraid
 ```
 
-Para `AUTH_MODE=jwt` com Container Apps, o `AZURE_CLIENT_SECRET` não é utilizado na validação de tokens. O servidor aceita tokens JWT do Entra ID diretamente, incluindo tokens OBO (On-Behalf-Of) emitidos por serviços upstream como App Service com Managed Identity.
+O `Dockerfile` é multi-stage (build venv → runtime slim), executa como usuário não-root (UID 10001) e expõe a porta 8000.
 
-## ⚠️ Limitações conhecidas
+### Azure Container Apps
 
-- Revogação de acesso não é imediata: tokens emitidos antes da remoção do grupo permanecem válidos por até 1 hora.
-- Apenas um modo de autenticação por instância: `AUTH_MODE=jwt` e `AUTH_MODE=oauth` não podem coexistir na mesma instância do servidor.
-- Ausência de audit log nativo no servidor: logs de acesso dependem da infraestrutura de hospedagem (Azure Monitor recomendado).
-- Tokens v1.0 são rejeitados: clientes que não suportam tokens v2.0 do Entra ID não conseguirão autenticar.
+Recomendado para produção:
 
-## ✅ Checklist de segurança
+- `AUTH_MODE=jwt` quando o cliente já obtém o token (portais, automações, OBO).
+- `AZURE_CLIENT_SECRET` (se `AUTH_MODE=oauth`) lido do Key Vault via Managed Identity.
+- `MCP_BASE_URL` igual à URL pública do app (`https://<app>.azurecontainerapps.io`).
+- `TRUST_PROXY_HEADERS=true` somente quando o ingress for confiável.
 
-### Identidade e acesso
+---
 
-- [ ] App Registration com `signInAudience: AzureADMyOrg`, restringindo ao tenant corporativo
-- [ ] `requestedAccessTokenVersion: 2`, com tokens v1.0 rejeitados pelo verifier
-- [ ] App Roles atribuídas a grupos, não a indivíduos, com controle centralizado e auditável
-- [ ] Consentimento administrativo concedido via `AllPrincipals`, sem prompts para usuários
+## Documentação complementar
 
-### Validação de token
+- [`docs/architecture.md`](docs/architecture.md) — princípios arquiteturais e checklist para novos projetos.
+- [`docs/adr/`](docs/adr/) — registros de decisão (ADR-0001 a ADR-0005).
+- [`scripts/provisioning.md`](scripts/provisioning.md) — uso detalhado dos scripts PowerShell de provisionamento.
+- [`SECURITY.md`](SECURITY.md) — política de divulgação coordenada.
 
-- [ ] Assinatura RS256 validada contra JWKS público do Entra
-- [ ] Issuer validado: `login.microsoftonline.com/<tenant>/v2.0`
-- [ ] Audience validado: `CLIENT_ID` da aplicação
-- [ ] Presença obrigatória de role válida verificada na conexão
+---
 
-### Controle de acesso
+## Referências
 
-- [ ] `RoleEnforcedJWTVerifier` rejeita conexão (401) antes de qualquer resposta MCP
-- [ ] `auth=` por ferramenta filtra `tools/list`, impedindo que a LLM veja ferramentas não autorizadas
-- [ ] `auth=` por ferramenta bloqueia `tools/call` em segunda camada de defesa
-
-### Secrets e configuração
-
-- [ ] Arquivo `.env` no `.gitignore`, com segredos nunca versionados
-- [ ] Em produção: `client_secret` armazenado no Key Vault, não em variáveis de ambiente em texto plano
-- [ ] Client secret com rotação definida (recomendado: anual ou semestral)
-
-### Infraestrutura
-
-- [ ] Servidor exposto somente via HTTPS em produção
-- [ ] Container App em VNet privada com acesso restrito por NSG
-- [ ] Logs roteados para Azure Monitor / Log Analytics
-- [ ] Alertas configurados para tentativas de acesso com 401 repetidas
-
-## 📚 Referências
-
-- [Documentação do FastMCP](https://gofastmcp.com)
-- [Integração FastMCP com Azure](https://gofastmcp.com/integrations/azure)
-- [App Roles do Microsoft Entra ID](https://learn.microsoft.com/pt-br/entra/identity-platform/howto-add-app-roles-in-apps)
-- [Continuous Access Evaluation (CAE)](https://learn.microsoft.com/pt-br/entra/identity/conditional-access/concept-continuous-access-evaluation)
-- [On-Behalf-Of Flow do Entra ID](https://learn.microsoft.com/pt-br/entra/identity-platform/v2-oauth2-on-behalf-of-flow)
-- [Azure Key Vault com Managed Identity](https://learn.microsoft.com/pt-br/azure/key-vault/general/overview)
-- [Referência Azure CLI](https://learn.microsoft.com/pt-br/cli/azure/)
-- [Microsoft Graph API para appRoleAssignments](https://learn.microsoft.com/pt-br/graph/api/serviceprincipal-post-approleassignments)
+- [FastMCP](https://gofastmcp.com)
+- [FastMCP — Azure integration](https://gofastmcp.com/integrations/azure)
+- [App Roles no Microsoft Entra ID](https://learn.microsoft.com/pt-br/entra/identity-platform/howto-add-app-roles-in-apps)
+- [Continuous Access Evaluation](https://learn.microsoft.com/pt-br/entra/identity/conditional-access/concept-continuous-access-evaluation)
+- [Model Context Protocol — spec](https://modelcontextprotocol.io)

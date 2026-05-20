@@ -56,6 +56,9 @@ We commit to:
 
 ## Hardening references
 
-Operational security guidance lives in the root `README.md` ("Visao geral
-de seguranca", "Checklist de seguranca"), in `docs/adr/` (decision records),
-and in `scripts/README.md` (provisioning security notes).
+Operational security guidance lives in:
+
+- [`README.md`](README.md) — section **Segurança**
+- [`docs/architecture.md`](docs/architecture.md) — trust boundaries
+- [`docs/adr/`](docs/adr/) — decision records (auth modes, App Roles, structlog, provisioning)
+- [`scripts/provisioning.md`](scripts/provisioning.md) — provisioning security notes

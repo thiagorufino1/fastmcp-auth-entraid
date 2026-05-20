@@ -1,5 +1,4 @@
 from collections.abc import Sequence
-from typing import Any
 
 from fastmcp import FastMCP
 from starlette.middleware import Middleware
@@ -26,8 +25,11 @@ def create_http_app(extra_middleware: Sequence[Middleware] | None = None) -> ASG
     component (audit logs, tool call events) inherits request_id.
     Pass extra_middleware to inject additional layers (e.g. in tests).
     """
+    settings = load_settings()
     mcp = create_mcp()
-    middleware: list[Any] = [Middleware(CorrelationMiddleware)]
+    middleware: list[Middleware] = [
+        Middleware(CorrelationMiddleware, trust_proxy_headers=settings.trust_proxy_headers)
+    ]
     if extra_middleware:
         middleware.extend(extra_middleware)
     return mcp.http_app(middleware=middleware)

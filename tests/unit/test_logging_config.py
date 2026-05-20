@@ -53,6 +53,23 @@ class TestConfigureLogging:
         assert payload["level"] == "info"
         assert "timestamp" in payload
 
+    def test_redacts_sensitive_fields(self, capsys):
+        logging_config.configure_logging(force=True)
+        logger = structlog.get_logger("app.test")
+        logger.info(
+            "event.fired",
+            password="secret-value",
+            client_secret="another-secret",
+            token="opaque-token",
+        )
+        captured = capsys.readouterr()
+        line = captured.err.strip().splitlines()[-1]
+        payload = json.loads(line)
+        assert payload["password"] == "[REDACTED]"
+        assert payload["client_secret"] == "[REDACTED]"
+        assert payload["token"] == "[REDACTED]"
+        assert "secret-value" not in line
+
     def test_stdlib_logging_bridged(self):
         logging_config.configure_logging(force=True)
         root = logging.getLogger()
