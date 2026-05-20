@@ -1,0 +1,45 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "fastmcp-auth-entraid"
+version = "0.1.0"
+description = "FastMCP server with Microsoft Entra ID authentication and App Role-based access control"
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.11"
+authors = [{ name = "Thiago Rufino" }]
+keywords = ["mcp", "fastmcp", "azure", "entra-id", "oauth", "rbac"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: System Administrators",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Security",
+    "Topic :: System :: Systems Administration :: Authentication/Directory",
+]
+dependencies = [
+    "fastmcp==3.2.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pip-tools>=7.4",
+]
+
+[project.urls]
+Repository = "https://github.com/thiagorufino/fastmcp-auth-entraid"
+Issues = "https://github.com/thiagorufino/fastmcp-auth-entraid/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["app"]
+
+[tool.pip-tools]
+generate-hashes = false
+strip-extras = true
