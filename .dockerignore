@@ -1,0 +1,63 @@
+# Version control
+.git
+.gitignore
+.gitattributes
+
+# Python build artifacts
+__pycache__
+*.py[cod]
+*$py.class
+*.egg-info
+*.egg
+build
+dist
+.eggs
+
+# Virtual environments
+.venv
+venv
+env
+
+# Secrets and local config
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+
+# IDE
+.vscode
+.idea
+*.iml
+*.swp
+.DS_Store
+Thumbs.db
+
+# Tests and dev tooling
+tests
+.pytest_cache
+.mypy_cache
+.ruff_cache
+.coverage
+coverage.xml
+htmlcov
+
+# Docs and CI
+docs
+*.md
+!README.md
+.github
+
+# Lock for dev only
+requirements-dev.txt
+pyproject.toml
+
+# Logs
+*.log
+logs
+
+# Docker
+Dockerfile*
+.dockerignore
