@@ -46,6 +46,7 @@ colorama==0.4.6
     # via
     #   build
     #   click
+    #   pytest
 cryptography==48.0.0
     # via
     #   authlib
@@ -62,6 +63,10 @@ email-validator==2.3.0
 exceptiongroup==1.3.1
     # via fastmcp
 fastmcp==3.2.0
+    # via
+    #   fastmcp-auth-entraid
+    #   fastmcp-auth-entraid (pyproject.toml)
+fastmcp-auth-entraid @ file:///C:/Users/thiag/OneDrive/Thiago/github/fastmcp-auth-entraid
     # via fastmcp-auth-entraid (pyproject.toml)
 h11==0.16.0
     # via
@@ -80,6 +85,8 @@ idna==3.15
     #   anyio
     #   email-validator
     #   httpx
+iniconfig==2.3.0
+    # via pytest
 jaraco-classes==3.4.0
     # via keyring
 jaraco-context==6.1.2
@@ -116,6 +123,7 @@ packaging==26.2
     # via
     #   build
     #   fastmcp
+    #   pytest
     #   wheel
 pathable==0.6.0
     # via jsonschema-path
@@ -123,6 +131,8 @@ pip-tools==7.5.3
     # via fastmcp-auth-entraid (pyproject.toml)
 platformdirs==4.9.6
     # via fastmcp
+pluggy==1.6.0
+    # via pytest
 py-key-value-aio==0.4.4
     # via fastmcp
 pycparser==3.0
@@ -139,6 +149,7 @@ pydantic-settings==2.14.1
     # via mcp
 pygments==2.20.0
     # via
+    #   pytest
     #   rich
     #   rich-rst
 pyjwt==2.12.1
@@ -149,6 +160,12 @@ pyproject-hooks==1.2.0
     # via
     #   build
     #   pip-tools
+pytest==9.0.3
+    # via
+    #   fastmcp-auth-entraid
+    #   pytest-asyncio
+pytest-asyncio==1.3.0
+    # via fastmcp-auth-entraid
 python-dotenv==1.2.2
     # via
     #   fastmcp
