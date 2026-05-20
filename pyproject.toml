@@ -44,7 +44,7 @@ Repository = "https://github.com/thiagorufino/fastmcp-auth-entraid"
 Issues = "https://github.com/thiagorufino/fastmcp-auth-entraid/issues"
 
 [tool.hatch.build.targets.wheel]
-packages = ["app"]
+packages = ["src/app"]
 
 [tool.pip-tools]
 generate-hashes = false
@@ -53,6 +53,7 @@ strip-extras = true
 [tool.pytest.ini_options]
 minversion = "8.0"
 testpaths = ["tests"]
+pythonpath = ["src"]
 asyncio_mode = "auto"
 addopts = [
     "-ra",

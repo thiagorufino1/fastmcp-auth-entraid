@@ -5,7 +5,7 @@ from fastmcp import FastMCP
 from fastmcp.server.auth import RemoteAuthProvider
 from fastmcp.server.auth.providers.azure import AzureProvider
 
-from app.main import create_mcp
+from app.server import create_mcp
 
 
 class TestCreateMcp:

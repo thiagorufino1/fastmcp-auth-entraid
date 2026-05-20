@@ -44,6 +44,9 @@ tests
 coverage.xml
 htmlcov
 
+# Provisioning scripts (run from host, not container)
+scripts
+
 # Docs and CI
 docs
 *.md

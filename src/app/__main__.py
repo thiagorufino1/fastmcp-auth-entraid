@@ -1,5 +1,5 @@
 from .logging_config import configure_logging
-from .main import create_mcp
+from .server import create_mcp
 
 
 if __name__ == "__main__":
