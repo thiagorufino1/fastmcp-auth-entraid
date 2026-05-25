@@ -5,7 +5,9 @@
     client secret, admin consent, security groups, and role assignments.
 
 .DESCRIPTION
-    Safe to re-run. Each step checks for existing resources before creating.
+    Safe to re-run for app registration, scopes, roles, and groups. Client
+    secret generation rotates the secret on each run unless -SkipClientSecret
+    is used.
     Outputs a .env-compatible block (and optionally writes a file) so the
     application can be configured without manual copy-paste from the portal.
 

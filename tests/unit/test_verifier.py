@@ -4,8 +4,10 @@ from dataclasses import dataclass
 from typing import Any
 
 import pytest
+from cryptography.fernet import Fernet
 
-from app.auth.verifier import RoleEnforcedJWTVerifier
+from app.auth.verifier import RoleEnforcedJWTVerifier, build_auth_provider
+from app.config import Settings
 
 
 @dataclass
@@ -84,3 +86,57 @@ class TestRoleEnforcedJWTVerifier:
             required_scopes=["access_as_user"],
         )
         assert await verifier.verify_token("any-token") is None
+
+
+class TestBuildAuthProvider:
+    def test_oauth_mode_wires_persistent_storage(self, monkeypatch, tmp_path):
+        captured: dict[str, Any] = {}
+
+        class _FakeAzureProvider:
+            def __init__(self, **kwargs):
+                captured.update(kwargs)
+
+        monkeypatch.setattr("app.auth.verifier.AzureProvider", _FakeAzureProvider)
+        settings = Settings(
+            tenant_id="00000000-0000-0000-0000-000000000001",
+            client_id="00000000-0000-0000-0000-000000000002",
+            client_secret="test-secret",
+            base_url="http://localhost:8000",
+            auth_mode="oauth",
+            oauth_jwt_signing_key="signing-key",
+            oauth_storage_dir=str(tmp_path),
+            oauth_storage_encryption_key=Fernet.generate_key().decode(),
+        )
+
+        provider = build_auth_provider(settings)
+
+        assert provider is not None
+        assert captured["jwt_signing_key"] == "signing-key"
+        assert "client_storage" in captured
+        assert captured["client_storage"] is not None
+
+    def test_oauth_mode_requires_jwt_signing_key(self):
+        settings = Settings(
+            tenant_id="00000000-0000-0000-0000-000000000001",
+            client_id="00000000-0000-0000-0000-000000000002",
+            client_secret="test-secret",
+            base_url="http://localhost:8000",
+            auth_mode="oauth",
+            oauth_storage_encryption_key=Fernet.generate_key().decode(),
+        )
+
+        with pytest.raises(ValueError, match="FASTMCP_JWT_SIGNING_KEY"):
+            build_auth_provider(settings)
+
+    def test_oauth_mode_requires_storage_encryption_key(self):
+        settings = Settings(
+            tenant_id="00000000-0000-0000-0000-000000000001",
+            client_id="00000000-0000-0000-0000-000000000002",
+            client_secret="test-secret",
+            base_url="http://localhost:8000",
+            auth_mode="oauth",
+            oauth_jwt_signing_key="signing-key",
+        )
+
+        with pytest.raises(ValueError, match="MCP_OAUTH_STORAGE_ENCRYPTION_KEY"):
+            build_auth_provider(settings)

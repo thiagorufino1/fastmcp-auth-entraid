@@ -3,6 +3,7 @@
 .env.local
 .env.*.local
 .python-version
+.data/
 *.pem
 *.key
 *.p12

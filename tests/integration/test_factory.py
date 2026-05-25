@@ -21,8 +21,7 @@ class TestCreateMcp:
         mcp = create_mcp()
         assert isinstance(mcp.auth, RemoteAuthProvider)
 
-    def test_oauth_mode_uses_azure_provider(self, azure_env, monkeypatch):
-        monkeypatch.setenv("AUTH_MODE", "oauth")
+    def test_oauth_mode_uses_azure_provider(self, oauth_env):
         mcp = create_mcp()
         assert isinstance(mcp.auth, AzureProvider)
 

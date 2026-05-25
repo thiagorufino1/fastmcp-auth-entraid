@@ -5,7 +5,9 @@ import uuid
 import structlog
 from starlette.types import ASGIApp, Receive, Scope, Send
 
-_logger = structlog.get_logger("app.middleware.correlation")
+from ..logging_config import get_logger
+
+_logger = get_logger("app.middleware.correlation")
 
 _REQUEST_ID_HEADER = "x-request-id"
 _FORWARDED_FOR_HEADER = "x-forwarded-for"

@@ -70,6 +70,10 @@ AUTH_MODE=jwt
 AZURE_CLIENT_SECRET=...   # only if not -SkipClientSecret
 ```
 
+That block only covers tenant/app registration values. For `AUTH_MODE=oauth`,
+the runtime still needs `FASTMCP_JWT_SIGNING_KEY`, `MCP_OAUTH_STORAGE_DIR`,
+and `MCP_OAUTH_STORAGE_ENCRYPTION_KEY` configured separately.
+
 ## Adding users to groups
 
 The script creates empty security groups. Add members manually or with:

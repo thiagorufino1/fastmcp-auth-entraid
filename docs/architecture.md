@@ -11,6 +11,7 @@ Para o histórico de decisões individuais, ver [`adr/`](adr/).
 - **Fronteiras operacionais claras**: `auth`, `middleware`, `tools` e `config` são pacotes independentes. Um deles pode ser substituído sem mexer nos outros.
 - **Falhar cedo**: `Settings` valida no boot. Ausência de variável obrigatória aborta o processo.
 - **Logs de auditoria, não de depuração**: eventos têm nome estável (`auth.token.rejected`, `mcp.tool.call.success`) e nunca incluem payloads.
+- **Estado OAuth persistente**: no modo `oauth`, o `client_storage` deve ficar em volume durável para manter a sessão entre reinícios.
 
 ## Diagrama de componentes
 
@@ -33,6 +34,7 @@ flowchart LR
 
     Cfg[(Settings<br/>config.py)] --> Auth
     Cfg --> C
+    Cfg --> Store[(OAuth client_storage<br/>FileTreeStore + Fernet)]
     Log[(structlog pipeline<br/>logging_config.py)]
     F --> FastMCP
 

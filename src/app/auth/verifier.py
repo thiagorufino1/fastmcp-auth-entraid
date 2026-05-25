@@ -1,11 +1,12 @@
-import structlog
 from fastmcp.server.auth import RemoteAuthProvider
 from fastmcp.server.auth.providers.azure import AzureJWTVerifier, AzureProvider
 from pydantic import AnyHttpUrl
 
 from ..config import ALLOWED_ROLES, Settings
+from ..logging_config import get_logger
+from .oauth_storage import build_oauth_client_storage
 
-_logger = structlog.get_logger("app.auth.verifier")
+_logger = get_logger("app.auth.verifier")
 
 
 class RoleEnforcedJWTVerifier(AzureJWTVerifier):
@@ -47,6 +48,10 @@ def build_auth_provider(settings: Settings) -> RemoteAuthProvider | AzureProvide
     if settings.auth_mode == "oauth":
         if not settings.client_secret:
             raise ValueError("AUTH_MODE=oauth requires AZURE_CLIENT_SECRET")
+        if not settings.oauth_jwt_signing_key:
+            raise ValueError("AUTH_MODE=oauth requires FASTMCP_JWT_SIGNING_KEY")
+        if not settings.oauth_storage_encryption_key:
+            raise ValueError("AUTH_MODE=oauth requires MCP_OAUTH_STORAGE_ENCRYPTION_KEY")
         return AzureProvider(
             client_id=settings.client_id,
             client_secret=settings.client_secret,
@@ -54,6 +59,11 @@ def build_auth_provider(settings: Settings) -> RemoteAuthProvider | AzureProvide
             base_url=settings.base_url,
             required_scopes=["access_as_user"],
             additional_authorize_scopes=["openid", "profile", "email"],
+            jwt_signing_key=settings.oauth_jwt_signing_key,
+            client_storage=build_oauth_client_storage(
+                storage_dir=settings.oauth_storage_dir,
+                encryption_key=settings.oauth_storage_encryption_key,
+            ),
         )
 
     verifier = RoleEnforcedJWTVerifier(

@@ -54,8 +54,9 @@ Positive:
 
 - Log Analytics queries can filter on structured fields
   (`event="auth.token.rejected" | subject="..."`).
-- Context binding propagates request-scoped data (e.g., `client_session`
-  added by `AuditMiddleware.on_initialize`) without thread-local boilerplate.
+- Context binding carries request-scoped data (`request_id`, `client_ip`) and
+  `client_session` is attached from the MCP session context on each request
+  without thread-local boilerplate.
 - Stdlib bridge means uvicorn and fastmcp logs are JSON too.
 - Sensitive payloads (token, args, return) are excluded by design; the
   test suite enforces this with explicit secret-leak guards.

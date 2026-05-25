@@ -71,14 +71,16 @@ flowchart TD
     Client[Cliente MCP]
     Correlation[CorrelationMiddleware<br/>request_id + client_ip]
     Auth[AuthProvider<br/>JWT verifier ou OAuth Proxy]
+    Store[client_storage<br/>FileTreeStore + Fernet]
     Entra[(Microsoft Entra ID<br/>JWKS / OIDC metadata)]
     Audit[AuditMiddleware<br/>eventos de tool/sessão]
-    Tools[Tools registradas<br/>soma / subtracao / multiplicacao / divisao]
+    Tools[Tools registradas]
     AuthCheck[require_roles<br/>App Roles enforcement]
     Logs[(stderr, JSON estruturado)]
 
     Client -- HTTP + Bearer --> Correlation
     Correlation --> Auth
+    Auth --> Store
     Auth -- valida assinatura/iss/aud --> Entra
     Auth --> Audit
     Audit --> AuthCheck
@@ -136,7 +138,7 @@ sequenceDiagram
     participant Client as Cliente MCP
     participant MCP as FastMCP Server
     participant Verifier as RoleEnforcedJWTVerifier
-    participant Entra as Entra ID (login.microsoftonline.com)
+    participant Entra as Entra ID
 
     Client->>Entra: (fora do servidor) obtém access_token
     Client->>MCP: POST /mcp com Authorization: Bearer <jwt>
@@ -176,6 +178,7 @@ sequenceDiagram
     participant Client as Cliente MCP
     participant Browser as Navegador
     participant MCP as FastMCP (AzureProvider)
+    participant Store as client_storage
     participant Entra as Entra ID
 
     Client->>MCP: GET /.well-known/oauth-authorization-server
@@ -186,9 +189,11 @@ sequenceDiagram
     Entra-->>Browser: tela de login + consent
     Browser->>MCP: /callback com code
     MCP->>Entra: troca code por access_token (client_secret)
+    MCP->>Store: persiste cliente + tokens upstream
     Entra-->>MCP: access_token (claims, roles)
     MCP-->>Client: emite token MCP
     Client->>MCP: chamadas MCP com Bearer
+    MCP->>Store: recarrega estado OAuth para refresh
     MCP->>MCP: enforcement de App Roles (mesmo que no modo jwt)
 ```
 
@@ -204,7 +209,7 @@ Esse modo exige `AZURE_CLIENT_SECRET` configurado. Para produção, mantenha o s
 | JWT válido sem App Role permitida | `verify_token` retorna `None`, request falha 401 | `auth.token.rejected` (com `subject`, `token_roles`) |
 | JWT válido com pelo menos uma role permitida | Prossegue | `auth.token.accepted` (com `subject`, `granted_roles`) |
 | Chamada de tool com role insuficiente | `tools/list` oculta a tool, `tools/call` retorna erro de autorização | (sem evento dedicado) |
-| `AUTH_MODE=oauth` sem `AZURE_CLIENT_SECRET` | Startup falha com `ValueError` | (sem evento, falha de boot) |
+| `AUTH_MODE=oauth` sem `AZURE_CLIENT_SECRET`, `FASTMCP_JWT_SIGNING_KEY` ou `MCP_OAUTH_STORAGE_ENCRYPTION_KEY` | Startup falha com `ValueError` | (sem evento, falha de boot) |
 
 ---
 
@@ -255,6 +260,9 @@ O efeito é visível **no próximo token emitido** (~1 hora por padrão). Para r
 | `AZURE_CLIENT_SECRET` | só em `AUTH_MODE=oauth` | (vazio) | Client secret. Em produção, leia do Key Vault. |
 | `AUTH_MODE` | não | `jwt` | `jwt` ou `oauth`. |
 | `MCP_BASE_URL` | não | `http://localhost:8000` | URL pública do servidor (usada na descoberta OAuth). |
+| `FASTMCP_JWT_SIGNING_KEY` | só em `AUTH_MODE=oauth` | (vazio) | Chave estável usada para assinar os JWTs emitidos pelo FastMCP. |
+| `MCP_OAUTH_STORAGE_DIR` | não | diretório de dados do usuário | Pasta persistente para o `client_storage` do OAuth Proxy. |
+| `MCP_OAUTH_STORAGE_ENCRYPTION_KEY` | só em `AUTH_MODE=oauth` | (vazio) | Chave Fernet usada para criptografar o estado OAuth em disco. |
 | `TRUST_PROXY_HEADERS` | não | `false` | Quando `true`, lê `X-Forwarded-For` para `client_ip`. Habilite apenas atrás de proxy confiável. |
 | `LOG_LEVEL` | não | `INFO` | `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`. |
 | `MCP_HOST` | não | `0.0.0.0` | Bind address do uvicorn. |
@@ -278,6 +286,8 @@ python -m app
 ```
 
 O entrypoint (`src/app/__main__.py`) carrega `.env` da CWD, configura logging e inicia `uvicorn`. O servidor responde em `http://localhost:8000/mcp/` (rota padrão do FastMCP HTTP transport).
+
+No modo `oauth`, o servidor usa `client_storage` persistente para manter o estado do OAuth Proxy e conseguir renovar tokens sem novo login manual. Em produção single-instance, `MCP_OAUTH_STORAGE_DIR` deve apontar para um volume persistente.
 
 ### 🧪 Validar autenticação
 
@@ -308,7 +318,8 @@ Os eventos correspondentes (`auth.token.accepted`, `mcp.client.connected`) apare
 │   ├── logging_config.py    # structlog JSON + redaction de campos sensíveis
 │   ├── auth/
 │   │   ├── verifier.py      # RoleEnforcedJWTVerifier + build_auth_provider
-│   │   └── checks.py        # require_roles(...) AuthCheck por tool
+│   │   ├── checks.py        # require_roles(...) AuthCheck por tool
+│   │   └── oauth_storage.py  # client_storage persistente do OAuth
 │   ├── middleware/
 │   │   ├── correlation.py   # request_id + client_ip via contextvars
 │   │   └── audit.py         # eventos de sessão e tool calls
@@ -358,7 +369,7 @@ Os eventos correspondentes (`auth.token.accepted`, `mcp.client.connected`) apare
 - 🕒 Timestamp **ISO 8601 UTC**.
 - 🛡️ **Redaction automática** de chaves sensíveis (`authorization`, `access_token`, `client_secret`, `id_token`, `password`, `refresh_token`, `secret`, `token`), substituídas por `[REDACTED]`.
 - 🔌 **Bridge stdlib**: logs de `uvicorn`, `fastmcp` e bibliotecas terceiras também saem em JSON.
-- 🧵 Bind via `contextvars`: `request_id`, `client_ip` e `client_session` são propagados automaticamente.
+- 🧵 `request_id` e `client_ip` via `contextvars`; `client_session` vem do `session_id` do contexto MCP em cada request.
 
 ### 📡 Eventos emitidos
 
@@ -528,6 +539,24 @@ docker run --rm -p 8000:8000 `
 ```
 
 O `Dockerfile` é multi-stage (build venv até runtime slim), executa como usuário não-root (UID 10001) e expõe a porta 8000.
+
+### OAuth com volume persistente
+
+```powershell
+docker run --rm -p 8000:8000 `
+  -e AUTH_MODE=oauth `
+  -e AZURE_TENANT_ID=<tenant-id> `
+  -e AZURE_CLIENT_ID=<client-id> `
+  -e AZURE_CLIENT_SECRET=<client-secret> `
+  -e FASTMCP_JWT_SIGNING_KEY=<stable-jwt-signing-key> `
+  -e MCP_OAUTH_STORAGE_ENCRYPTION_KEY=<fernet-key> `
+  -e MCP_BASE_URL=https://<public-host> `
+  -e MCP_OAUTH_STORAGE_DIR=/data/oauth `
+  -v fastmcp-oauth-data:/data `
+  fastmcp-auth-entraid
+```
+
+Se o volume `/data` não persistir, o proxy perde o estado e pode pedir novo login.
 
 ### ☁️ Azure Container Apps
 

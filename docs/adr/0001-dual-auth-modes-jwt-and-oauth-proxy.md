@@ -43,4 +43,6 @@ Negative:
   scenarios require two deployments (or a routing layer).
 - `AZURE_CLIENT_SECRET` is mandatory in `oauth` mode and irrelevant in
   `jwt` mode; the secret-handling story differs across environments.
+- `oauth` mode also requires persistent client storage and a stable JWT
+  signing key for production use.
 - Documentation must explain both flows, doubling the surface area.

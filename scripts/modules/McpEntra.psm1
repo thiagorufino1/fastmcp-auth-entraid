@@ -96,16 +96,27 @@ function Set-McpAccessAsUserScope {
     param([Parameter(Mandatory)][string]$ObjectId)
     Write-Step "OAuth scope: access_as_user"
     $app = Invoke-AzJson rest --method GET --uri "https://graph.microsoft.com/v1.0/applications/$ObjectId" -o json
-    $existing = @($app.api.oauth2PermissionScopes | Where-Object { $_.value -eq 'access_as_user' })
-    if ($existing.Count -gt 0) {
-        Write-Ok "already exists (id=$($existing[0].id))"
-        return $existing[0].id
+    $api = @{}
+    if ($app.api) {
+        foreach ($prop in $app.api.PSObject.Properties) {
+            $api[$prop.Name] = $prop.Value
+        }
     }
 
-    $scopeId = [System.Guid]::NewGuid().ToString()
-    $body = @{
-        api = @{
-            oauth2PermissionScopes = @(@{
+    $currentScopes = @()
+    if ($api.ContainsKey('oauth2PermissionScopes') -and $api.oauth2PermissionScopes) {
+        $currentScopes = @($api.oauth2PermissionScopes | Where-Object { $_ })
+    }
+
+    $existingScopes = @($currentScopes | Where-Object { $_.value -eq 'access_as_user' })
+    $scopeId = $null
+    if ($existingScopes.Count -gt 0) {
+        $scopeId = $existingScopes[0].id
+    }
+    else {
+        $scopeId = [System.Guid]::NewGuid().ToString()
+        $api.oauth2PermissionScopes = @(
+            @($currentScopes) + @(@{
                 adminConsentDescription = 'Acessar mcp-lab como o usuario autenticado'
                 adminConsentDisplayName = 'Acessar mcp-lab'
                 id                      = $scopeId
@@ -115,8 +126,16 @@ function Set-McpAccessAsUserScope {
                 userConsentDisplayName  = 'Acessar mcp-lab'
                 value                   = 'access_as_user'
             })
-        }
-    } | ConvertTo-Json -Depth 6 -Compress
+        )
+    }
+
+    if ($api.requestedAccessTokenVersion -ne 2) {
+        $api.requestedAccessTokenVersion = 2
+    }
+
+    $body = @{
+        api = $api
+    } | ConvertTo-Json -Depth 8 -Compress
 
     $bodyFile = New-TemporaryFile
     try {
@@ -125,7 +144,12 @@ function Set-McpAccessAsUserScope {
             --uri "https://graph.microsoft.com/v1.0/applications/$ObjectId" `
             --headers "Content-Type=application/json" `
             --body "@$bodyFile" | Out-Null
-        Write-Ok "created (id=$scopeId)"
+        if ($existingScopes.Count -gt 0) {
+            Write-Ok "already exists (id=$scopeId)"
+        }
+        else {
+            Write-Ok "created (id=$scopeId)"
+        }
         return $scopeId
     }
     finally { Remove-Item $bodyFile -Force -ErrorAction SilentlyContinue }
@@ -293,11 +317,16 @@ function Set-McpAppRoleAssignment {
     )
     Write-Step "Assign role '$RoleValue' to principal $PrincipalId"
     $existing = Invoke-AzJson rest --method GET `
-        --uri "https://graph.microsoft.com/v1.0/servicePrincipals/$ResourceId/appRoleAssignedTo?`$filter=principalId eq $PrincipalId and appRoleId eq $AppRoleId" `
+        --uri "https://graph.microsoft.com/v1.0/servicePrincipals/$ResourceId/appRoleAssignedTo" `
         -o json
     if ($existing.value -and @($existing.value).Count -gt 0) {
-        Write-Ok "already assigned"
-        return
+        $match = @($existing.value | Where-Object {
+            $_.principalId -eq $PrincipalId -and $_.appRoleId -eq $AppRoleId
+        })
+        if ($match.Count -gt 0) {
+            Write-Ok "already assigned"
+            return
+        }
     }
 
     $body = @{

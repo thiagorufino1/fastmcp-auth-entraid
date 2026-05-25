@@ -1,9 +1,13 @@
 import os
 from dataclasses import dataclass
 from functools import lru_cache
+from pathlib import Path
+
+from platformdirs import user_data_dir
 
 DEFAULT_BASE_URL = "http://localhost:8000"
 DEFAULT_AUTH_MODE = "jwt"
+DEFAULT_OAUTH_STORAGE_DIR = str(Path(user_data_dir("fastmcp-auth-entraid")) / "oauth")
 ALLOWED_ROLES = frozenset({"mcp-trc-read", "mcp-trc-admin"})
 
 
@@ -15,6 +19,9 @@ class Settings:
     base_url: str = DEFAULT_BASE_URL
     auth_mode: str = DEFAULT_AUTH_MODE
     trust_proxy_headers: bool = False
+    oauth_jwt_signing_key: str = ""
+    oauth_storage_dir: str = DEFAULT_OAUTH_STORAGE_DIR
+    oauth_storage_encryption_key: str = ""
 
 
 def _env(name: str) -> str:
@@ -51,4 +58,8 @@ def load_settings() -> Settings:
         base_url=base_url,
         auth_mode=auth_mode,
         trust_proxy_headers=_env_bool("TRUST_PROXY_HEADERS", False),
+        oauth_jwt_signing_key=os.getenv("FASTMCP_JWT_SIGNING_KEY", "").strip(),
+        oauth_storage_dir=os.getenv("MCP_OAUTH_STORAGE_DIR", DEFAULT_OAUTH_STORAGE_DIR).strip()
+        or DEFAULT_OAUTH_STORAGE_DIR,
+        oauth_storage_encryption_key=os.getenv("MCP_OAUTH_STORAGE_ENCRYPTION_KEY", "").strip(),
     )

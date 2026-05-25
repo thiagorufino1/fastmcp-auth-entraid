@@ -20,6 +20,9 @@ def _clear_env(monkeypatch: pytest.MonkeyPatch) -> None:
         "AZURE_CLIENT_SECRET",
         "MCP_BASE_URL",
         "AUTH_MODE",
+        "FASTMCP_JWT_SIGNING_KEY",
+        "MCP_OAUTH_STORAGE_DIR",
+        "MCP_OAUTH_STORAGE_ENCRYPTION_KEY",
     ):
         monkeypatch.delenv(key, raising=False)
 
@@ -43,6 +46,9 @@ class TestSettingsDataclass:
         assert settings.client_secret == ""
         assert settings.base_url == DEFAULT_BASE_URL
         assert settings.auth_mode == DEFAULT_AUTH_MODE
+        assert settings.oauth_jwt_signing_key == ""
+        assert settings.oauth_storage_encryption_key == ""
+        assert settings.oauth_storage_dir
 
     def test_uses_slots(self):
         settings = Settings(tenant_id="t", client_id="c")
@@ -89,6 +95,16 @@ class TestLoadSettings:
     def test_client_secret_optional(self, azure_env, monkeypatch):
         monkeypatch.delenv("AZURE_CLIENT_SECRET", raising=False)
         assert load_settings().client_secret == ""
+
+    def test_oauth_mode_loads_persistence_settings(self, oauth_env):
+        settings = load_settings()
+        assert settings.auth_mode == "oauth"
+        assert settings.oauth_jwt_signing_key == oauth_env["FASTMCP_JWT_SIGNING_KEY"]
+        assert settings.oauth_storage_dir == oauth_env["MCP_OAUTH_STORAGE_DIR"]
+        assert (
+            settings.oauth_storage_encryption_key
+            == oauth_env["MCP_OAUTH_STORAGE_ENCRYPTION_KEY"]
+        )
 
     def test_default_base_url(self, monkeypatch):
         _clear_env(monkeypatch)

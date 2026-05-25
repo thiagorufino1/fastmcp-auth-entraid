@@ -18,7 +18,13 @@ class _FakeMessage:
 @dataclass
 class _FakeContext:
     message: Any = None
+    fastmcp_context: Any = None
     timestamp: str = "2026-05-19T12:00:00Z"
+
+
+@dataclass
+class _FakeFastMCPContext:
+    session_id: str
 
 
 @dataclass
@@ -55,7 +61,10 @@ class TestAuditMiddleware:
             )
         )
         middleware = AuditMiddleware()
-        ctx = _FakeContext(message=_FakeMessage(name="soma"))
+        ctx = _FakeContext(
+            message=_FakeMessage(name="soma"),
+            fastmcp_context=_FakeFastMCPContext(session_id="session-1"),
+        )
 
         async def _next(_ctx):
             return "ok"
@@ -73,6 +82,7 @@ class TestAuditMiddleware:
         assert success["upn"] == "user1@example.com"
         assert success["oid"] == "oid-1"
         assert success["tid"] == "tid-1"
+        assert success["client_session"] == "session-1"
         assert success["roles"] == ["mcp-trc-read"]
         assert "duration_ms" in success
 
@@ -89,7 +99,10 @@ class TestAuditMiddleware:
             )
         )
         middleware = AuditMiddleware()
-        ctx = _FakeContext(message=_FakeMessage(name="health_check"))
+        ctx = _FakeContext(
+            message=_FakeMessage(name="health_check"),
+            fastmcp_context=_FakeFastMCPContext(session_id="session-2"),
+        )
 
         async def _next(_ctx):
             raise RuntimeError("boom")
@@ -104,11 +117,15 @@ class TestAuditMiddleware:
         assert error["upn"] == "user2@example.com"
         assert error["oid"] == "oid-2"
         assert error["tid"] == "tid-2"
+        assert error["client_session"] == "session-2"
 
     async def test_handles_missing_token_gracefully(self, _reset_structlog, patch_token):
         patch_token(None)
         middleware = AuditMiddleware()
-        ctx = _FakeContext(message=_FakeMessage(name="soma"))
+        ctx = _FakeContext(
+            message=_FakeMessage(name="soma"),
+            fastmcp_context=_FakeFastMCPContext(session_id="session-3"),
+        )
 
         async def _next(_ctx):
             return "ok"
@@ -121,12 +138,16 @@ class TestAuditMiddleware:
         assert success["upn"] is None
         assert success["oid"] is None
         assert success["tid"] is None
+        assert success["client_session"] == "session-3"
         assert success["roles"] == []
 
     async def test_prefers_oid_when_sub_missing(self, _reset_structlog, patch_token):
         patch_token(_FakeToken(claims={"oid": "object-id-9"}))
         middleware = AuditMiddleware()
-        ctx = _FakeContext(message=_FakeMessage(name="soma"))
+        ctx = _FakeContext(
+            message=_FakeMessage(name="soma"),
+            fastmcp_context=_FakeFastMCPContext(session_id="session-4"),
+        )
 
         async def _next(_ctx):
             return None
@@ -139,6 +160,7 @@ class TestAuditMiddleware:
         assert success["upn"] is None
         assert success["oid"] == "object-id-9"
         assert success["tid"] is None
+        assert success["client_session"] == "session-4"
 
     async def test_on_initialize_emits_connected_event(self, _reset_structlog, patch_token):
         patch_token(
@@ -153,7 +175,7 @@ class TestAuditMiddleware:
             )
         )
         middleware = AuditMiddleware()
-        ctx = _FakeContext()
+        ctx = _FakeContext(fastmcp_context=_FakeFastMCPContext(session_id="session-5"))
 
         async def _next(_ctx):
             return "initialized"
@@ -167,12 +189,16 @@ class TestAuditMiddleware:
         assert connected["upn"] == "user3@example.com"
         assert connected["oid"] == "oid-3"
         assert connected["tid"] == "tid-3"
+        assert connected["client_session"] == "session-5"
         assert connected["roles"] == ["mcp-trc-read"]
 
     async def test_does_not_log_tool_arguments_or_return_value(self, _reset_structlog, patch_token):
         patch_token(_FakeToken(claims={"sub": "user-4", "roles": ["mcp-trc-read"]}))
         middleware = AuditMiddleware()
-        ctx = _FakeContext(message=_FakeMessage(name="soma"))
+        ctx = _FakeContext(
+            message=_FakeMessage(name="soma"),
+            fastmcp_context=_FakeFastMCPContext(session_id="session-6"),
+        )
         secret_args = {"password": "should-never-leak"}
         ctx.arguments = secret_args
 
