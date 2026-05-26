@@ -140,9 +140,9 @@ python-dotenv==1.2.2
     #   pydantic-settings
 python-multipart==0.0.29
     # via mcp
-pywin32==311
+pywin32==311; platform_system == "Windows"
     # via mcp
-pywin32-ctypes==0.2.3
+pywin32-ctypes==0.2.3; platform_system == "Windows"
     # via keyring
 pyyaml==6.0.3
     # via

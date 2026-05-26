@@ -18,6 +18,7 @@ def build_oauth_client_storage(
     encryption_key: str,
 ) -> AsyncKeyValue:
     resolved_dir = Path(storage_dir).expanduser()
+    resolved_dir.mkdir(parents=True, exist_ok=True)
     store = FileTreeStore(
         data_directory=resolved_dir,
         key_sanitization_strategy=FileTreeV1KeySanitizationStrategy(resolved_dir),

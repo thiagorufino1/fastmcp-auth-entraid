@@ -219,7 +219,7 @@ O provisionamento completo é automatizado em [`scripts/Provision-McpEntra.ps1`]
 
 ### 📦 Recursos provisionados
 
-1. 🏷️ **App Registration**: `signInAudience=AzureADMyOrg`, identifier URI `api://<client-id>`, `requestedAccessTokenVersion=2` (rejeita tokens v1).
+1. 🏷️ **App Registration**: `signInAudience=AzureADMyOrg`, identifier URI `api://<client-id>`, `requestedAccessTokenVersion=2` (rejeita tokens v1). Redirect URIs: `http://localhost:8000/auth/callback` para local e `https://ca-mcp-lab.thankfulrock-a7cf354f.eastus.azurecontainerapps.io/auth/callback` para o container publicado.
 2. 🎟️ **OAuth scope** `access_as_user`: delegado, consentido pelo usuário. Não carrega autorização por si só, é o gate para emissão de token.
 3. 👥 **App Roles** `mcp-trc-read` e `mcp-trc-admin`: atribuíveis a `User` e `Application` (para Managed Identity / OBO). Esses nomes também são os valores em `claims.roles`.
 4. 🧱 **Service Principal**: habilita sign-ins para a App Registration.
@@ -261,7 +261,7 @@ O efeito é visível **no próximo token emitido** (~1 hora por padrão). Para r
 | `AUTH_MODE` | não | `jwt` | `jwt` ou `oauth`. |
 | `MCP_BASE_URL` | não | `http://localhost:8000` | URL pública do servidor (usada na descoberta OAuth). |
 | `FASTMCP_JWT_SIGNING_KEY` | só em `AUTH_MODE=oauth` | (vazio) | Chave estável usada para assinar os JWTs emitidos pelo FastMCP. |
-| `MCP_OAUTH_STORAGE_DIR` | não | diretório de dados do usuário | Pasta persistente para o `client_storage` do OAuth Proxy. |
+| `MCP_OAUTH_STORAGE_DIR` | não | `.../oauth` | Pasta persistente para o `client_storage` do OAuth Proxy. |
 | `MCP_OAUTH_STORAGE_ENCRYPTION_KEY` | só em `AUTH_MODE=oauth` | (vazio) | Chave Fernet usada para criptografar o estado OAuth em disco. |
 | `TRUST_PROXY_HEADERS` | não | `false` | Quando `true`, lê `X-Forwarded-For` para `client_ip`. Habilite apenas atrás de proxy confiável. |
 | `LOG_LEVEL` | não | `INFO` | `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`. |
@@ -287,7 +287,7 @@ python -m app
 
 O entrypoint (`src/app/__main__.py`) carrega `.env` da CWD, configura logging e inicia `uvicorn`. O servidor responde em `http://localhost:8000/mcp/` (rota padrão do FastMCP HTTP transport).
 
-No modo `oauth`, o servidor usa `client_storage` persistente para manter o estado do OAuth Proxy e conseguir renovar tokens sem novo login manual. Em produção single-instance, `MCP_OAUTH_STORAGE_DIR` deve apontar para um volume persistente.
+No modo `oauth`, o servidor usa `client_storage` persistente e criptografado para manter o estado do OAuth Proxy. Isso permite reaproveitar a sessão upstream sem novo login manual. Em produção single-instance, `MCP_OAUTH_STORAGE_DIR` deve apontar para um volume persistente; o diretório é criado automaticamente na inicialização, se não existir.
 
 ### 🧪 Validar autenticação
 

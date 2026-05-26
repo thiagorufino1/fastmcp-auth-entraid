@@ -22,7 +22,7 @@ ENV PATH="/opt/venv/bin:${PATH}"
 COPY requirements.txt ./
 RUN pip install -r requirements.txt
 
-COPY pyproject.toml README.md ./
+COPY pyproject.toml README.md LICENSE ./
 COPY src ./src
 RUN pip install --no-deps .
 
